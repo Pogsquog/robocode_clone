@@ -12,14 +12,16 @@ func main() {
     set_radar_rate(45);
     set_body_rate(5);
     set_velocity(4);
+    var aim = -1; // bearing of the last enemy seen (-1: none yet)
     while (true) {
         var e = pop_event();
         if (e == "scanned") {
-            var diff = angdiff(event_bearing(), gun_heading());
-            set_gun_rate(diff * 2);
-            if (abs(diff) < 5 && gun_heat() <= 0 && energy() > 10) {
-                fire(2);
-            }
+            aim = event_bearing();
+        }
+        // The orbiting radar only sees the enemy now and then: keep the gun
+        // on where it was last seen, firing whenever the gun is ready.
+        if (aim >= 0 && energy() > 10) {
+            fire_at(aim, 2);
         }
         await_tick();
     }

@@ -20,12 +20,7 @@ func aim_and_fire() {
     // Heading is 0 = north, clockwise: east is +x, south is +y.
     var px = event_x() + sin(event_heading()) * event_velocity() * t;
     var py = event_y() - cos(event_heading()) * event_velocity() * t;
-    var aim = bearing_to(px, py);
-    var diff = angdiff(aim, gun_heading());
-    set_gun_rate(diff * 3);
-    if (abs(diff) < 2 && gun_heat() <= 0 && d < 600) {
-        fire(power);
-    }
+    fire_at(bearing_to(px, py), power);
     // Keep the radar locked on the target.
     set_radar_rate(angdiff(event_bearing(), radar_heading()) * 3);
 }

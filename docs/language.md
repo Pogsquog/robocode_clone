@@ -271,3 +271,4 @@ go (see `examples/learner.bot`).
 | `examples/tracker.bot` | radar + gun lock, continuous fire, dodge wiggle |
 | `examples/sniper.bot` | stationary lead-targeting sharpshooter |
 | `examples/learner.bot` | statistical ("guess factor") gun that learns movement patterns, using arrays |
+| `examples/rammer.bot` | charges on a curving path and fires heavy shots point-blank |

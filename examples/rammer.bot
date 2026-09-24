@@ -1,0 +1,79 @@
+// Rammer: charges the enemy along a curving path. At range it swings wide
+// of the direct line; as it closes the curve tightens into a straight
+// charge. Each time it's hit it switches to curving the other way, so a
+// gun that assumes it keeps moving the same way keeps missing. Up close it
+// fires heavy point-blank shots.
+// Demonstrates: steering by bearing offset, handling every queued event
+// each tick, wall avoidance.
+
+func angdiff(a, b) {
+    var d = (a - b) % 360;
+    if (d > 180) { d = d - 360; }
+    if (d <= -180) { d = d + 360; }
+    return d;
+}
+
+// Would driving `ahead` units along `heading` leave the arena (with margin)?
+func blocked(heading, ahead) {
+    var px = x() + sin(heading) * ahead;
+    var py = y() - cos(heading) * ahead;
+    return px < 40 || px > arena_w() - 40 || py < 40 || py > arena_h() - 40;
+}
+
+func steer() {
+    // Swing up to 60 degrees off the direct line at long range, none up close.
+    var offset = side * 60 * min(1, max(0, (enemy_dist - 80) / 420));
+    var want = norm_deg(enemy_bearing + offset);
+    if (blocked(want, 100)) {
+        // The arc would hit a wall: curve the other way instead.
+        side = -side;
+        want = norm_deg(enemy_bearing - offset);
+    }
+    set_body_rate(angdiff(want, body_heading()));
+    set_velocity(8);
+}
+
+func shoot() {
+    // Heavy shots up close, where they can't miss; light ones at range.
+    var power = 1;
+    if (enemy_dist < 150) { power = 3; }
+    fire_at(enemy_bearing, power);
+}
+
+func main() {
+    var side = 1;
+    var seen = false;
+    var enemy_bearing = 0;
+    var enemy_dist = 1000;
+
+    set_radar_rate(45);
+    set_velocity(8);
+    while (true) {
+        // Handle everything that happened last tick, not just one event.
+        var scanned = false;
+        var e = pop_event();
+        while (e != false) {
+            if (e == "scanned") {
+                scanned = true;
+                seen = true;
+                enemy_bearing = event_bearing();
+                enemy_dist = event_dist();
+            }
+            if (e == "hit_by_bullet") {
+                side = -side;
+            }
+            e = pop_event();
+        }
+
+        if (scanned) {
+            set_radar_rate(angdiff(enemy_bearing, radar_heading()) * 3);
+            shoot();
+        } else {
+            set_radar_rate(45);
+        }
+        if (seen) {
+            steer();
+        }
+        await_tick();
+    }
+}

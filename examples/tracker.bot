@@ -18,12 +18,8 @@ func main() {
         if (e == "scanned") {
             // Keep the radar on the target: rotate toward it.
             set_radar_rate(angdiff(event_bearing(), radar_heading()) * 3);
-            // Aim the gun.
-            var diff = angdiff(event_bearing(), gun_heading());
-            set_gun_rate(diff * 2);
-            if (abs(diff) < 4 && gun_heat() <= 0) {
-                fire(1.5);
-            }
+            // Aim and fire.
+            fire_at(event_bearing(), 1.5);
         }
         // Wiggle: change direction every 25 ticks.
         if (time() % 25 == 0) {

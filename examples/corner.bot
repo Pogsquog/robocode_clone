@@ -32,11 +32,7 @@ func main() {
         if (e == "scanned") {
             // Lock the radar onto the target so it rescans every tick.
             set_radar_rate(angdiff(event_bearing(), radar_heading()) * 3);
-            var diff = angdiff(event_bearing(), gun_heading());
-            set_gun_rate(diff * 2);
-            if (abs(diff) < 4 && gun_heat() <= 0) {
-                fire(1);
-            }
+            fire_at(event_bearing(), 1);
         } else {
             // Nothing in sight: resume the search sweep.
             set_radar_rate(45);

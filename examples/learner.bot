@@ -57,12 +57,7 @@ func on_scan() {
     check_waves(bearing, event_dist());
     launch_wave(bearing, dir);
 
-    var aim = bearing + dir * best_gf() * MAX_ESCAPE;
-    var diff = angdiff(aim, gun_heading());
-    set_gun_rate(diff * 3);
-    if (abs(diff) < 2 && gun_heat() <= 0) {
-        fire(POWER);
-    }
+    fire_at(bearing + dir * best_gf() * MAX_ESCAPE, POWER);
     // Keep the radar locked on.
     set_radar_rate(angdiff(bearing, radar_heading()) * 3);
 }
