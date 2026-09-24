@@ -352,6 +352,46 @@ mod tests {
     }
 
     #[test]
+    fn a_move_stopped_by_a_wall_resumes_the_robot() {
+        // Heads for a wall with a move far longer than the arena: the wall
+        // must end the move and the code after it must run.
+        let mut b = sandbox_battle(
+            "func main() { ahead(5000); log(\"after\"); while (true) { await_tick(); } }",
+        );
+        for _ in 0..300 {
+            b.step();
+        }
+        assert!(b.robots[0].alive, "{:?}", b.robots[0].fault);
+        assert!(b.logs.iter().any(|(_, r, m)| *r == 0 && m == "after"));
+    }
+
+    #[test]
+    fn a_move_stopped_by_a_collision_resumes_both_robots() {
+        let specs: Vec<RobotSpec> = ["a", "b"]
+            .iter()
+            .map(|n| RobotSpec {
+                name: n.to_string(),
+                source:
+                    "func main() { turn_body(norm_deg(bearing_to(500, 350) - body_heading())); \
+                         ahead(5000); log(\"after\"); while (true) { await_tick(); } }"
+                        .into(),
+            })
+            .collect();
+        let mut b = Battle::new(Config::default(), &specs, 4, 3000).unwrap();
+        for _ in 0..300 {
+            b.step();
+        }
+        assert!(b
+            .snapshots
+            .iter()
+            .any(|s| s.events.iter().any(|e| e.contains("collided"))));
+        for id in 0..2 {
+            assert!(b.robots[id].alive, "{:?}", b.robots[id].fault);
+            assert!(b.logs.iter().any(|(_, r, m)| *r == id && m == "after"));
+        }
+    }
+
+    #[test]
     fn log_cap_is_per_robot() {
         let cfg = Config::default();
         let specs = vec![

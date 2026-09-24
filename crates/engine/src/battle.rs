@@ -382,9 +382,7 @@ impl Battle {
                 r.y = clamped_y;
                 r.velocity = 0.0;
                 let bearing = r.body_heading;
-                if matches!(r.pending, Some(Pending::Move { .. })) {
-                    r.pending = None; // wall stops the move
-                }
+                end_move(&mut r.pending); // wall stops the move
                 self.take_damage(i, cfg.wall_damage);
                 let mut e = Event::empty(EventKind::Wall);
                 e.bearing = bearing;
@@ -423,9 +421,7 @@ impl Battle {
                         self.robots[idx].x = self.robots[idx].x.clamp(m, self.cfg.arena_w - m);
                         self.robots[idx].y = self.robots[idx].y.clamp(m, self.cfg.arena_h - m);
                         self.robots[idx].velocity = 0.0;
-                        if matches!(self.robots[idx].pending, Some(Pending::Move { .. })) {
-                            self.robots[idx].pending = None;
-                        }
+                        end_move(&mut self.robots[idx].pending);
                     }
                     for (me, other) in [(a, b), (b, a)] {
                         let mut e = Event::empty(EventKind::RobotCollision);
@@ -741,6 +737,14 @@ fn next_velocity(v: f64, target: f64, cfg: &Config) -> f64 {
         v + (target - v).clamp(-cfg.decel, cfg.decel)
     } else {
         v - v.signum() * v.abs().min(cfg.decel)
+    }
+}
+
+/// Cut a blocking move short. The move completes rather than vanishing, so
+/// the robot's paused code is resumed next tick like any finished move.
+fn end_move(pending: &mut Option<Pending>) {
+    if let Some(Pending::Move { remaining, .. }) = pending {
+        *remaining = 0.0;
     }
 }
 
