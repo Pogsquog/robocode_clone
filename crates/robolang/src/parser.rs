@@ -3,15 +3,27 @@
 use crate::ast::*;
 use crate::lexer::{lex, SyntaxError, Tok, Token};
 
+/// Maximum syntactic nesting (blocks, parentheses, unary operators, and
+/// operator chains). Part of the sandbox: the parser, compiler and AST drop
+/// all recurse over this depth, so it must stay well within a thread stack.
+pub const MAX_NESTING: usize = 100;
+
 pub fn parse(source: &str) -> Result<Program, SyntaxError> {
     let tokens = lex(source)?;
-    let mut p = Parser { tokens, pos: 0 };
+    let mut p = Parser {
+        tokens,
+        pos: 0,
+        depth: 0,
+    };
     p.program()
 }
 
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// Current nesting depth; an upper bound on the depth of the AST being
+    /// built.
+    depth: usize,
 }
 
 impl Parser {
@@ -60,6 +72,17 @@ impl Parser {
         }
     }
 
+    fn enter(&mut self) -> Result<(), SyntaxError> {
+        self.depth += 1;
+        if self.depth > MAX_NESTING {
+            return Err(self.err(format!(
+                "code is nested too deeply (max {} levels)",
+                MAX_NESTING
+            )));
+        }
+        Ok(())
+    }
+
     fn err(&self, msg: String) -> SyntaxError {
         SyntaxError {
             msg,
@@ -76,6 +99,7 @@ impl Parser {
     }
 
     fn func_decl(&mut self) -> Result<FuncDecl, SyntaxError> {
+        let line = self.line();
         self.expect(&Tok::Func, "'func'")?;
         let name = self.expect_ident("function name")?;
         self.expect(&Tok::LParen, "'('")?;
@@ -95,12 +119,13 @@ impl Parser {
             name,
             params,
             body,
-            line: self.line(),
+            line,
         })
     }
 
     fn block(&mut self) -> Result<Block, SyntaxError> {
         self.expect(&Tok::LBrace, "'{'")?;
+        self.enter()?;
         let mut stmts = Vec::new();
         while !matches!(self.peek(), Tok::RBrace) {
             if matches!(self.peek(), Tok::Eof) {
@@ -109,6 +134,7 @@ impl Parser {
             stmts.push(self.statement()?);
         }
         self.bump(); // '}'
+        self.depth -= 1;
         Ok(stmts)
     }
 
@@ -264,13 +290,18 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr, SyntaxError> {
-        self.logical_or()
+        self.enter()?;
+        let e = self.logical_or()?;
+        self.depth -= 1;
+        Ok(e)
     }
 
     fn logical_or(&mut self) -> Result<Expr, SyntaxError> {
         let mut lhs = self.logical_and()?;
+        let base = self.depth;
         while matches!(self.peek(), Tok::OrOr) {
             self.bump();
+            self.enter()?;
             let rhs = self.logical_and()?;
             lhs = Expr::Logical {
                 op: LogOp::Or,
@@ -278,13 +309,16 @@ impl Parser {
                 rhs: Box::new(rhs),
             };
         }
+        self.depth = base;
         Ok(lhs)
     }
 
     fn logical_and(&mut self) -> Result<Expr, SyntaxError> {
         let mut lhs = self.equality()?;
+        let base = self.depth;
         while matches!(self.peek(), Tok::AndAnd) {
             self.bump();
+            self.enter()?;
             let rhs = self.equality()?;
             lhs = Expr::Logical {
                 op: LogOp::And,
@@ -292,19 +326,25 @@ impl Parser {
                 rhs: Box::new(rhs),
             };
         }
+        self.depth = base;
         Ok(lhs)
     }
 
     fn equality(&mut self) -> Result<Expr, SyntaxError> {
         let mut lhs = self.comparison()?;
+        let base = self.depth;
         loop {
             let op = match self.peek() {
                 Tok::Eq => BinOp::Eq,
                 Tok::Ne => BinOp::Ne,
-                _ => return Ok(lhs),
+                _ => {
+                    self.depth = base;
+                    return Ok(lhs);
+                }
             };
             let line = self.line();
             self.bump();
+            self.enter()?;
             let rhs = self.comparison()?;
             lhs = Expr::Binary {
                 op,
@@ -317,16 +357,21 @@ impl Parser {
 
     fn comparison(&mut self) -> Result<Expr, SyntaxError> {
         let mut lhs = self.term()?;
+        let base = self.depth;
         loop {
             let op = match self.peek() {
                 Tok::Lt => BinOp::Lt,
                 Tok::Le => BinOp::Le,
                 Tok::Gt => BinOp::Gt,
                 Tok::Ge => BinOp::Ge,
-                _ => return Ok(lhs),
+                _ => {
+                    self.depth = base;
+                    return Ok(lhs);
+                }
             };
             let line = self.line();
             self.bump();
+            self.enter()?;
             let rhs = self.term()?;
             lhs = Expr::Binary {
                 op,
@@ -339,14 +384,19 @@ impl Parser {
 
     fn term(&mut self) -> Result<Expr, SyntaxError> {
         let mut lhs = self.factor()?;
+        let base = self.depth;
         loop {
             let op = match self.peek() {
                 Tok::Plus => BinOp::Add,
                 Tok::Minus => BinOp::Sub,
-                _ => return Ok(lhs),
+                _ => {
+                    self.depth = base;
+                    return Ok(lhs);
+                }
             };
             let line = self.line();
             self.bump();
+            self.enter()?;
             let rhs = self.factor()?;
             lhs = Expr::Binary {
                 op,
@@ -359,15 +409,20 @@ impl Parser {
 
     fn factor(&mut self) -> Result<Expr, SyntaxError> {
         let mut lhs = self.unary()?;
+        let base = self.depth;
         loop {
             let op = match self.peek() {
                 Tok::Star => BinOp::Mul,
                 Tok::Slash => BinOp::Div,
                 Tok::Percent => BinOp::Mod,
-                _ => return Ok(lhs),
+                _ => {
+                    self.depth = base;
+                    return Ok(lhs);
+                }
             };
             let line = self.line();
             self.bump();
+            self.enter()?;
             let rhs = self.unary()?;
             lhs = Expr::Binary {
                 op,
@@ -383,7 +438,9 @@ impl Parser {
         match self.peek() {
             Tok::Minus => {
                 self.bump();
+                self.enter()?;
                 let expr = self.unary()?;
+                self.depth -= 1;
                 Ok(Expr::Unary {
                     op: UnOp::Neg,
                     expr: Box::new(expr),
@@ -392,7 +449,9 @@ impl Parser {
             }
             Tok::Not => {
                 self.bump();
+                self.enter()?;
                 let expr = self.unary()?;
+                self.depth -= 1;
                 Ok(Expr::Unary {
                     op: UnOp::Not,
                     expr: Box::new(expr),
@@ -475,6 +534,48 @@ mod tests {
     #[test]
     fn rejects_missing_semi() {
         assert!(parse("func main() { var x = 1 }").is_err());
+    }
+
+    #[test]
+    fn func_decl_line_is_where_it_starts() {
+        let prog = parse("\n\nfunc main() {\n\n}\n\nfunc f() { }").unwrap();
+        assert_eq!(prog.funcs[0].line, 3);
+        assert_eq!(prog.funcs[1].line, 7);
+    }
+
+    fn wrap(depth: usize, open: &str, inner: &str, close: &str) -> String {
+        format!("{}{}{}", open.repeat(depth), inner, close.repeat(depth))
+    }
+
+    #[test]
+    fn deep_nesting_is_rejected_not_a_stack_overflow() {
+        let n = 200_000;
+        let cases = [
+            format!("func main() {{ var x = {}; }}", wrap(n, "(", "1", ")")),
+            format!("func main() {{ var x = {}1; }}", "-".repeat(n)),
+            format!("func main() {{ var x = {}; }}", wrap(n, "!", "1", "")),
+            format!("func main() {{ var x = 1{}; }}", " + 1".repeat(n)),
+            format!("func main() {{ var x = 1{}; }}", " && 1".repeat(n)),
+            format!("func main() {{ {} }}", wrap(n, "if (1) { ", "", "}")),
+        ];
+        for src in &cases {
+            let err = parse(src).unwrap_err();
+            assert!(err.msg.contains("nested too deeply"), "{}", err.msg);
+        }
+    }
+
+    #[test]
+    fn nesting_just_under_the_limit_parses_and_compiles() {
+        // Runs on a test thread (2 MB stack), so this also checks the limit
+        // is comfortably safe for the parser and compiler.
+        let src = format!(
+            "func main() {{ var x = {}; }}",
+            wrap(MAX_NESTING - 3, "(", "1", ")")
+        );
+        let prog = parse(&src).unwrap();
+        crate::compile::compile_program(&prog).unwrap();
+        let src = format!("func main() {{ var x = 1{}; }}", " + 1".repeat(MAX_NESTING - 3));
+        crate::compile::compile_program(&parse(&src).unwrap()).unwrap();
     }
 
     #[test]

@@ -24,26 +24,26 @@ pub use vm::{RunOutcome, Vm};
 /// bots fail loudly instead of misbehaving.
 pub const LANGUAGE_VERSION: u32 = 1;
 
+/// Largest accepted robot source, in bytes. Part of the sandbox.
+pub const MAX_SOURCE_BYTES: usize = 256 * 1024;
+
 fn check_version(source: &str) -> Result<(), CompileError> {
-    for line in source.lines() {
+    for (line_no, line) in source.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
         let mut words = trimmed.split_whitespace();
-        if words.next() == Some("//") {
-            if words.next() == Some("robolang") {
-                match words.next().and_then(|v| v.parse::<u32>().ok()) {
-                    Some(v) if v > LANGUAGE_VERSION => {
-                        return Err(CompileError {
-                            msg: format!(
-                                "robot requires language version {}, this engine speaks version {}",
-                                v, LANGUAGE_VERSION
-                            ),
-                            line: 1,
-                        })
-                    }
-                    _ => {}
+        if words.next() == Some("//") && words.next() == Some("robolang") {
+            if let Some(v) = words.next().and_then(|v| v.parse::<u32>().ok()) {
+                if v > LANGUAGE_VERSION {
+                    return Err(CompileError {
+                        msg: format!(
+                            "robot requires language version {}, this engine speaks version {}",
+                            v, LANGUAGE_VERSION
+                        ),
+                        line: line_no as u32 + 1,
+                    });
                 }
             }
         }
@@ -54,6 +54,16 @@ fn check_version(source: &str) -> Result<(), CompileError> {
 
 /// Compile robot source code into a shareable [`Program`].
 pub fn compile(source: &str) -> Result<std::rc::Rc<Program>, CompileError> {
+    if source.len() > MAX_SOURCE_BYTES {
+        return Err(CompileError {
+            msg: format!(
+                "robot source is {} bytes; the limit is {} KB",
+                source.len(),
+                MAX_SOURCE_BYTES / 1024
+            ),
+            line: 0,
+        });
+    }
     check_version(source)?;
     let ast = parser::parse(source).map_err(|e| CompileError {
         msg: e.msg,
@@ -70,6 +80,13 @@ mod tests {
     fn accepts_current_version_pragma_and_no_pragma() {
         assert!(compile("// robolang 1\nfunc main() { await_tick(); }").is_ok());
         assert!(compile("\n\nfunc main() { }").is_ok());
+    }
+
+    #[test]
+    fn rejects_oversized_source() {
+        let src = format!("func main() {{ }}{}", " ".repeat(MAX_SOURCE_BYTES));
+        let err = compile(&src).unwrap_err();
+        assert!(err.msg.contains("limit"), "{}", err.msg);
     }
 
     #[test]

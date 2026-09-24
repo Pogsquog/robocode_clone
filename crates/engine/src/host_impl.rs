@@ -11,10 +11,23 @@ pub struct RobotHost<'a> {
     id: usize,
 }
 
+/// Fetch a numeric argument. Non-finite values (NaN, infinity) are a fault:
+/// they would otherwise leak into the simulation and break its invariants
+/// (a NaN energy never reaches zero; a NaN position is never hit).
 fn num_arg(args: &[Value], i: usize, what: &str) -> Result<f64, String> {
-    args.get(i)
+    let n = args
+        .get(i)
         .and_then(|v| v.as_num())
-        .ok_or_else(|| format!("'{}' expects a number for argument {}", what, i + 1))
+        .ok_or_else(|| format!("'{}' expects a number for argument {}", what, i + 1))?;
+    if !n.is_finite() {
+        return Err(format!(
+            "'{}' got {} for argument {}; numbers passed to the engine must be finite",
+            what,
+            Value::Num(n),
+            i + 1
+        ));
+    }
+    Ok(n)
 }
 
 impl<'a> RobotHost<'a> {
@@ -126,8 +139,8 @@ impl<'a> Host for RobotHost<'a> {
             // Actions.
             Log => {
                 let msg = args.first().map(|v| v.to_display()).unwrap_or_default();
-                let cap = self.battle.cfg.max_logs * self.battle.robots.len();
-                if self.battle.logs.len() < cap {
+                if self.battle.robots[id].stats.logs < self.battle.cfg.max_logs {
+                    self.battle.robots[id].stats.logs += 1;
                     let name = self.battle.robots[id].name.clone();
                     let tick = self.battle.tick;
                     self.battle.logs.push((tick, id, msg.clone()));

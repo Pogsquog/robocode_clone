@@ -210,4 +210,145 @@ mod tests {
         assert!(b.robots[0].energy < e0, "wall grinding must cost energy");
     }
 
+    #[test]
+    fn instantly_completing_blocking_calls_share_the_tick_budget() {
+        // Each call completes at once and resumes the VM within the same
+        // tick; without a shared budget this loop never yields.
+        for call in ["ahead(0)", "back(0)", "turn_body(0)", "turn_gun(0)", "turn_radar(0)"] {
+            let src = format!("func main() {{ while (true) {{ {}; }} }}", call);
+            let mut b = sandbox_battle(&src);
+            b.run();
+            assert!(!b.robots[0].alive, "{} loop must forfeit", call);
+            assert!(b.robots[0].fault.as_deref().unwrap().contains("budget"));
+            assert!(b.tick < 100, "{} loop forfeited late, at tick {}", call, b.tick);
+        }
+    }
+
+    #[test]
+    fn non_finite_numbers_cannot_enter_the_simulation() {
+        for call in [
+            "fire(sqrt(0 - 1))",
+            "set_velocity(sqrt(0 - 1))",
+            "set_body_rate(sqrt(0 - 1))",
+            "turn_gun(sqrt(0 - 1))",
+            "ahead(sqrt(0 - 1))",
+            "bearing_to(sqrt(0 - 1), 0)",
+        ] {
+            let src = format!("func main() {{ {}; while (true) {{ await_tick(); }} }}", call);
+            let mut b = sandbox_battle(&src);
+            b.run();
+            assert!(!b.robots[0].alive, "{} must forfeit", call);
+            assert!(
+                b.robots[0].fault.as_deref().unwrap().contains("finite"),
+                "{}: {:?}",
+                call,
+                b.robots[0].fault
+            );
+            // (The fault message itself says "NaN"; the numbers must not.)
+            assert!(b
+                .snapshots
+                .iter()
+                .all(|s| s.robots.iter().flatten().chain(s.bullets.iter().flatten()).all(|v| v.is_finite())));
+        }
+    }
+
+    #[test]
+    fn nan_comparison_in_robot_code_is_harmless() {
+        let mut b = sandbox_battle(
+            "func main() { var n = sqrt(0 - 1); if (n < 1 || n >= 1) { fire(1); } \
+             while (true) { await_tick(); } }",
+        );
+        for _ in 0..20 {
+            b.step();
+        }
+        assert!(b.robots[0].alive, "{:?}", b.robots[0].fault);
+        assert_eq!(b.robots[0].stats.fired, 0, "NaN comparisons are false");
+    }
+
+    /// Positions logged by a robot as "x,y" lines.
+    fn logged_points(b: &Battle, id: usize) -> Vec<(f64, f64)> {
+        b.logs
+            .iter()
+            .filter(|(_, r, _)| *r == id)
+            .map(|(_, _, m)| {
+                let (x, y) = m.split_once(',').unwrap();
+                (x.parse().unwrap(), y.parse().unwrap())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn blocking_moves_cover_the_requested_distance() {
+        let mut b = sandbox_battle(
+            "func here() { log(x() + \",\" + y()); } \
+             func main() { \
+                here(); ahead(20); here(); \
+                set_velocity(8); await_tick(); await_tick(); await_tick(); \
+                set_velocity(0); here(); back(10); here(); \
+                for (var i = 0; i < 5; i += 1) { await_tick(); } here(); \
+                while (true) { await_tick(); } }",
+        );
+        for _ in 0..60 {
+            b.step();
+        }
+        assert_eq!(b.robots[0].stats.damage_taken, 0.0, "must not hit a wall");
+        let p = logged_points(&b, 0);
+        assert_eq!(p.len(), 5);
+        let d = |a: (f64, f64), b: (f64, f64)| dist(a.0, a.1, b.0, b.1);
+        assert!((d(p[0], p[1]) - 20.0).abs() < 1e-6, "ahead(20) moved {}", d(p[0], p[1]));
+        // back(10) issued at speed: net displacement is still 10, backwards.
+        assert!((d(p[2], p[3]) - 10.0).abs() < 1e-6, "back(10) moved {}", d(p[2], p[3]));
+        assert!(d(p[0], p[3]) < d(p[0], p[2]), "back() must move backwards");
+        // And the tank stops where the move ended.
+        assert!(d(p[3], p[4]) < 1e-6, "coasted {} after back()", d(p[3], p[4]));
+    }
+
+    #[test]
+    fn log_cap_is_per_robot() {
+        let cfg = Config::default();
+        let specs = vec![
+            RobotSpec {
+                name: "spammer".into(),
+                source: "func main() { while (true) { \
+                         for (var i = 0; i < 50; i += 1) { log(\"spam\"); } await_tick(); } }"
+                    .into(),
+            },
+            RobotSpec {
+                name: "quiet".into(),
+                source: "func main() { while (true) { log(\"hi\"); await_tick(); } }".into(),
+            },
+        ];
+        let mut b = Battle::new(cfg.clone(), &specs, 3, 3000).unwrap();
+        for _ in 0..100 {
+            b.step();
+        }
+        let count = |id| b.logs.iter().filter(|(_, r, _)| *r == id).count();
+        assert_eq!(count(0), cfg.max_logs);
+        assert_eq!(count(1), 100, "the spammer must not use up others' log quota");
+    }
+
+    #[test]
+    fn dead_shooter_gets_no_refund_and_spent_bullets_are_dropped() {
+        let mut b = sandbox_battle("func main() { while (true) { await_tick(); } }");
+        b.step();
+        b.robots[0].alive = false;
+        let (x, y) = (b.robots[1].x, b.robots[1].y);
+        b.bullets.push(Bullet {
+            owner: 0,
+            x,
+            y: y + 30.0,
+            heading: 0.0,
+            speed: 12.0,
+            power: 2.0,
+            spawn_tick: 0,
+            alive: true,
+        });
+        let (e0, e1) = (b.robots[0].energy, b.robots[1].energy);
+        b.step();
+        assert!(b.robots[1].energy < e1, "the bullet must hit");
+        assert_eq!(b.robots[0].energy, e0, "a dead shooter gains nothing");
+        assert!(b.robots[0].events.is_empty());
+        assert!(b.bullets.is_empty(), "spent bullets are removed");
+    }
+
 }

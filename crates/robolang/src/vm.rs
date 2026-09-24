@@ -46,8 +46,12 @@ pub struct Vm {
     ip: usize,
     cur_func: usize,
     resume: Option<Value>,
-    resume_ip: usize,
+    /// Paused on a blocking host call; `resume()` must be called before the
+    /// next `run()`.
+    blocked: bool,
     halted: bool,
+    /// Instructions executed over the VM's lifetime (see `ops_executed`).
+    ops_total: u64,
 }
 
 impl Vm {
@@ -61,8 +65,9 @@ impl Vm {
             ip: 0,
             cur_func: 0,
             resume: None,
-            resume_ip: 0,
+            blocked: false,
             halted: false,
+            ops_total: 0,
         };
         vm.enter_func(0);
         vm
@@ -70,6 +75,12 @@ impl Vm {
 
     pub fn is_halted(&self) -> bool {
         self.halted
+    }
+
+    /// Total instructions executed so far. Lets a host charge several `run`
+    /// calls within one tick against a single budget.
+    pub fn ops_executed(&self) -> u64 {
+        self.ops_total
     }
 
     /// Deliver the result of a completed blocking operation. The next `run`
@@ -108,14 +119,15 @@ impl Vm {
     }
 
     pub fn run(&mut self, host: &mut dyn Host, budget: u32) -> RunOutcome {
-        if let Some(v) = self.resume.take() {
-            if self.halted {
-                return RunOutcome::Halted;
-            }
+        if self.blocked {
+            let Some(v) = self.resume.take() else {
+                return RunOutcome::Fault("internal error: run() while blocked without resume()".into());
+            };
+            self.blocked = false;
+            // The blocking call's result becomes its return value.
             if self.push(v).is_err() {
                 return RunOutcome::Fault("value stack overflow on resume".into());
             }
-            self.ip = self.resume_ip;
         }
         let mut executed: u32 = 0;
         loop {
@@ -126,7 +138,8 @@ impl Vm {
                 return RunOutcome::BudgetExceeded;
             }
             executed += 1;
-            let op = self.prog.funcs[self.cur_func].code[self.ip].clone();
+            self.ops_total += 1;
+            let op = self.prog.funcs[self.cur_func].code[self.ip];
             self.ip += 1;
             match self.exec_op(op, host) {
                 Ok(None) => {}
@@ -268,9 +281,9 @@ impl Vm {
                 match host.call(hf, args) {
                     Ok(HostOutcome::Value(v)) => self.push(v)?,
                     Ok(HostOutcome::Block(req)) => {
-                        // Rewind so this instruction re-appears after resume.
-                        self.ip -= 1;
-                        self.resume_ip = self.ip + 1;
+                        // ip already points past this call; resume() supplies
+                        // its result.
+                        self.blocked = true;
                         return Ok(Some(RunOutcome::Blocked(req)));
                     }
                     Err(msg) => return Err(msg),
@@ -317,9 +330,13 @@ fn values_equal(a: &Value, b: &Value) -> bool {
 }
 
 fn compare(a: &Value, b: &Value, op: Op) -> Result<bool, String> {
-    let r = match (a, b) {
-        (Value::Num(x), Value::Num(y)) => x.partial_cmp(y),
-        (Value::Str(x), Value::Str(y)) => Some(x.cmp(y)),
+    let o = match (a, b) {
+        // Any ordering against NaN is false, as in IEEE 754.
+        (Value::Num(x), Value::Num(y)) => match x.partial_cmp(y) {
+            Some(o) => o,
+            None => return Ok(false),
+        },
+        (Value::Str(x), Value::Str(y)) => x.cmp(y),
         _ => {
             return Err(format!(
                 "cannot compare {} with {}",
@@ -328,7 +345,6 @@ fn compare(a: &Value, b: &Value, op: Op) -> Result<bool, String> {
             ))
         }
     };
-    let o = r.expect("f64 comparison produced no ordering (NaN?)");
     Ok(match op {
         Op::Lt => o.is_lt(),
         Op::Le => o.is_le(),
@@ -574,11 +590,44 @@ mod tests {
     }
 
     #[test]
+    fn var_without_initializer_is_null_each_time() {
+        let logs = logged(
+            "func f() { for (var i = 0; i < 2; i += 1) { var x; log(x); x = 5; } } \
+             func main() { f(); for (var i = 0; i < 2; i += 1) { var y; log(y); y = 5; } }",
+        );
+        assert_eq!(logs, vec!["null", "null", "null", "null"]);
+    }
+
+    #[test]
     fn string_concat() {
         let logs = logged(
             "func main() { var s = \"a\" + 1 + true; log(s); log(\"x\" == \"x\"); }",
         );
         assert_eq!(logs, vec!["a1true", "true"]);
+    }
+
+    #[test]
+    fn nan_comparisons_are_false_not_a_panic() {
+        for op in [Op::Lt, Op::Le, Op::Gt, Op::Ge] {
+            assert_eq!(compare(&Value::Num(f64::NAN), &Value::Num(1.0), op), Ok(false));
+        }
+    }
+
+    #[test]
+    fn run_without_resume_faults_instead_of_panicking() {
+        struct BlockHost;
+        impl Host for BlockHost {
+            fn call(
+                &mut self,
+                _f: crate::host::HostFn,
+                _args: Vec<Value>,
+            ) -> Result<HostOutcome, String> {
+                Ok(HostOutcome::Block(BlockRequest::AwaitTick))
+            }
+        }
+        let mut vm = Vm::new(compile("func main() { ahead(5); }"));
+        assert!(matches!(vm.run(&mut BlockHost, 100), RunOutcome::Blocked(_)));
+        assert!(matches!(vm.run(&mut BlockHost, 100), RunOutcome::Fault(_)));
     }
 
     #[test]

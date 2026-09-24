@@ -54,8 +54,10 @@ func name(param1, param2) { ... return value; }
 - Recursion is allowed (call depth is capped).
 - Variables declared with `var` **anywhere in `main` are global** — they
   persist across ticks and are visible inside every function. This is where
-  your robot's memory lives.
+  your robot's memory lives. Declaring the same name again in `main` (say,
+  two `for (var i = ...)` loops) reuses the same global.
 - `var` inside other functions (and function parameters) is local.
+- `var x;` with no initializer sets `x` to `null` every time it runs.
 
 ### Types and expressions
 
@@ -79,15 +81,20 @@ func name(param1, param2) { ... return value; }
 | Call depth | 96 |
 | Value stack | 4,096 |
 | Globals / locals / functions | 256 / 256 / 64 |
+| Nesting depth (blocks, parentheses, operator chains) | 100 |
 | Source size | 256 KB |
 
 An infinite loop that never calls a blocking function burns the instruction
-budget every tick; after 30 strikes the robot forfeits. An infinite loop
+budget every tick; after 30 strikes the robot forfeits. The budget covers
+the whole tick: a blocking call that finishes instantly (`ahead(0)`,
+`turn_gun(0)`) resumes your code in the same tick and keeps spending it. An infinite loop
 that *does* block (`while (true) { ... await_tick(); }`) is the normal way
 to write a robot.
 
-A runtime fault (bad types, division by zero, calling `ahead("fast")`)
-forfeits the robot immediately. Compile errors are reported by `tank check`
+A runtime fault (bad types, division by zero, calling `ahead("fast")`,
+passing NaN or infinity to a battle function, e.g. `fire(sqrt(-1))`)
+forfeits the robot immediately. Comparisons involving NaN are simply
+`false`. Compile errors are reported by `tank check`
 before any battle starts.
 
 ## Battle model
@@ -124,7 +131,10 @@ Two styles, freely mixable:
 | `set_gun_rate(deg)` | gun deg/tick, max 20 |
 | `set_radar_rate(deg)` | radar deg/tick, max 45 |
 
-Acceleration is 2 units/tick, braking is 4. While a blocking motion is in
+Acceleration is 2 units/tick, braking is 4. Blocking moves brake in time
+to stop on the requested distance, even when called at speed or while
+moving the other way; the one exception is a distance shorter than the
+tank's minimum braking distance. While a blocking motion is in
 progress, your code cannot run — use the advanced style if you need to react
 every tick (that is what good combat bots do).
 
@@ -182,7 +192,7 @@ Events become visible the tick after they happen.
 `sin(deg)`, `cos(deg)`, `abs(n)`, `min(a,b)`, `max(a,b)`, `sqrt(n)`,
 `norm_deg(deg)` (normalize to 0..360), `bearing_to(x, y)` (absolute bearing
 from you to a point — the key to aiming), `log(anything)` (debug output,
-shown by `--verbose` and in the replay viewer).
+shown by `--verbose` and in the replay viewer; up to 500 lines per robot).
 
 ### Aiming recipe
 

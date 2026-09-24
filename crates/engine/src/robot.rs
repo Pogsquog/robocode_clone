@@ -25,6 +25,8 @@ pub struct RobotStats {
     pub damage_dealt: f64,
     pub damage_taken: f64,
     pub budget_strikes: u32,
+    /// log() lines recorded so far (capped at `Config::max_logs`).
+    pub logs: usize,
 }
 
 pub struct Robot {

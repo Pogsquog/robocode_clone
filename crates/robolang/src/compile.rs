@@ -2,7 +2,9 @@
 //!
 //! Scoping rules:
 //! - Every `var` declared anywhere in `main` is hoisted to a *global* and is
-//!   visible from all functions (and persists across ticks).
+//!   visible from all functions (and persists across ticks). Declaring the
+//!   same name twice in `main` refers to the same global.
+//! - `var x;` without an initializer sets `x` to null each time it runs.
 //! - `var` declared inside any other function (and `for` loop variables there)
 //!   are function-locals. Parameters are locals.
 //! - Names resolve innermost-scope-first, then globals, else compile error.
@@ -13,7 +15,7 @@ use crate::value::Value;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Op {
     Const(u16),
     Pop,
@@ -182,10 +184,7 @@ fn hoist_globals(body: &[Stmt], globals: &mut HashMap<String, u16>) -> Result<()
             match s {
                 Stmt::Var { name, line, .. } => {
                     if globals.contains_key(name) {
-                        return Err(CompileError {
-                            msg: format!("duplicate variable '{}'", name),
-                            line: *line,
-                        });
+                        continue; // redeclaration: same global
                     }
                     if globals.len() >= MAX_GLOBALS {
                         return Err(CompileError {
@@ -202,10 +201,13 @@ fn hoist_globals(body: &[Stmt], globals: &mut HashMap<String, u16>) -> Result<()
                     }
                 }
                 Stmt::While { body, .. } => walk(body, globals)?,
-                Stmt::For { init, body, .. } => {
+                Stmt::For {
+                    init, step, body, ..
+                } => {
                     if let Some(init) = init {
                         walk(std::slice::from_ref(init), globals)?;
                     }
+                    walk(step, globals)?;
                     walk(body, globals)?;
                 }
                 _ => {}
@@ -351,16 +353,14 @@ impl<'a> FuncCompiler<'a> {
                             line: *line,
                         }
                     })?;
-                    if let Some(e) = init {
-                        self.expr(e)?;
-                        self.emit(Op::SetGlobal(g))?;
-                    }
+                    self.var_init(init)?;
+                    self.emit(Op::SetGlobal(g))?;
                 } else {
+                    // Compile the initializer before declaring, so
+                    // `var x = x;` reads any outer `x`.
+                    self.var_init(init)?;
                     let slot = self.declare_local(name, *line)?;
-                    if let Some(e) = init {
-                        self.expr(e)?;
-                        self.emit(Op::SetLocal(slot))?;
-                    }
+                    self.emit(Op::SetLocal(slot))?;
                 }
             }
             Stmt::Assign {
@@ -515,6 +515,18 @@ impl<'a> FuncCompiler<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Push a `var` initializer, or null when there is none.
+    fn var_init(&mut self, init: &Option<Expr>) -> Result<(), CompileError> {
+        match init {
+            Some(e) => self.expr(e),
+            None => {
+                let z = self.const_idx(Value::Null)?;
+                self.emit(Op::Const(z))?;
+                Ok(())
+            }
+        }
     }
 
     fn expr(&mut self, e: &Expr) -> Result<(), CompileError> {
@@ -693,6 +705,21 @@ mod tests {
     fn rejects_bad_arity() {
         assert!(compile("func main() { fire(); }").is_err());
         assert!(compile("func f(a) { return a; } func main() { f(1, 2); }").is_err());
+    }
+
+    #[test]
+    fn main_may_redeclare_a_global() {
+        let p = compile(
+            "func main() { if (true) { var a = 1; } else { var a = 2; } \
+             for (var i = 0; i < 2; i += 1) { } for (var i = 0; i < 2; i += 1) { } }",
+        )
+        .unwrap();
+        assert_eq!(p.n_globals, 2);
+    }
+
+    #[test]
+    fn var_in_for_step_in_main_is_hoisted() {
+        compile("func main() { for (var i = 0; i < 2; var j = 1) { i += 1; } }").unwrap();
     }
 
     #[test]

@@ -13,8 +13,9 @@ const state = {
   speed: 1,
   lastFrameTime: null,
   acc: 0,
-  logLines: [],   // accumulated event text
 };
+
+const FALLBACK_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c", "#e91e63", "#cddc39"];
 
 const canvas = document.getElementById("arena");
 const ctx = canvas.getContext("2d");
@@ -56,11 +57,18 @@ function loadFile(f) {
 
 function loadReplay(data) {
   if (!data.ticks || data.ticks.length === 0) throw new Error("replay has no ticks");
+  // Replays may come from anyone: colors are only ever used as #rrggbb.
+  data.robots.forEach((r, i) => {
+    if (typeof r.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(r.color)) {
+      r.color = FALLBACK_COLORS[i % FALLBACK_COLORS.length];
+    }
+    r.name = String(r.name);
+  });
   state.replay = data;
   state.frame = 0;
   state.playing = false;
-  state.logLines = [];
-  logwrap.innerHTML = "";
+  logwrap.replaceChildren();
+  absorbEvents(0, logwrap);
   banner.style.display = "none";
   hint.style.display = "none";
 
@@ -72,15 +80,22 @@ function loadReplay(data) {
   canvas.dataset.w = w;
   canvas.dataset.h = h;
 
-  // Energy bars.
-  bars.innerHTML = "";
+  // Energy bars (built with DOM APIs: nothing from the file becomes markup).
+  bars.replaceChildren();
   data.robots.forEach((r, i) => {
     const bar = document.createElement("div");
     bar.className = "bar";
-    bar.innerHTML =
-      `<span class="name" style="color:${r.color}">${escapeHtml(r.name)}</span>` +
-      `<span class="track"><span class="fill" id="fill${i}" style="background:${r.color};width:100%"></span></span>` +
-      `<span class="val" id="val${i}">100</span>`;
+    const name = span("name", r.name);
+    name.style.color = r.color;
+    const track = span("track");
+    const fill = span("fill");
+    fill.id = "fill" + i;
+    fill.style.background = r.color;
+    fill.style.width = "100%";
+    track.appendChild(fill);
+    const val = span("val", "100");
+    val.id = "val" + i;
+    bar.append(name, track, val);
     bars.appendChild(bar);
   });
 
@@ -127,34 +142,34 @@ window.addEventListener("keydown", (e) => {
 
 function setFrame(n) {
   if (!state.replay) return;
-  // Rebuild the log when scrubbing backwards; otherwise append.
+  // Rebuild the log when scrubbing backwards; otherwise append. Either way,
+  // build off-DOM and attach once.
+  const frag = document.createDocumentFragment();
   if (n < state.frame) {
-    state.logLines = [];
-    logwrap.innerHTML = "";
-    for (let i = 0; i <= n; i++) absorbEvents(i, false);
+    for (let i = 0; i <= n; i++) absorbEvents(i, frag);
+    logwrap.replaceChildren(frag);
   } else {
-    for (let i = state.frame + 1; i <= n; i++) absorbEvents(i, true);
+    for (let i = state.frame + 1; i <= n; i++) absorbEvents(i, frag);
+    logwrap.appendChild(frag);
   }
+  logwrap.scrollTop = logwrap.scrollHeight;
   state.frame = n;
   scrub.value = n;
   draw();
 }
 
-function absorbEvents(idx, append) {
+// Append tick `idx`'s events to `target` as log lines.
+function absorbEvents(idx, target) {
   const t = state.replay.ticks[idx];
   if (!t.e || t.e.length === 0) return;
   for (const ev of t.e) {
     const cls = ev.includes("destroyed") || ev.includes("forfeit")
       ? "death"
       : ev.includes("bullet hit") ? "hit" : "log";
-    if (append) {
-      const div = document.createElement("div");
-      div.className = "ev " + cls;
-      div.textContent = `[${String(t.t).padStart(4)}] ${ev}`;
-      logwrap.appendChild(div);
-      logwrap.scrollTop = logwrap.scrollHeight;
-    }
-    state.logLines.push({ t: t.t, ev, cls });
+    const div = document.createElement("div");
+    div.className = "ev " + cls;
+    div.textContent = `[${String(t.t).padStart(4)}] ${ev}`;
+    target.appendChild(div);
   }
 }
 
@@ -241,7 +256,7 @@ function draw() {
 
 function drawTank(r, color, scale) {
   const [x, y] = toCanvas(r[0], r[1]);
-  const bodyR = 18 * scale;
+  const bodyR = (state.replay.arena.tank_r || 18) * scale;
 
   // Body: circle with a direction wedge.
   ctx.fillStyle = color;
@@ -320,8 +335,11 @@ requestAnimationFrame(tick);
 
 // ---------- utilities ----------
 
-function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function span(cls, text) {
+  const el = document.createElement("span");
+  el.className = cls;
+  if (text !== undefined) el.textContent = text;
+  return el;
 }
 
 function hexToRgba(hex, alpha) {

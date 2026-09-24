@@ -186,13 +186,10 @@ fn cmd_run(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
         // Robot name comes from the file name.
-        let name = path
-            .trim_end_matches('/')
-            .rsplit('/')
-            .next()
-            .unwrap_or(path)
-            .trim_end_matches(".bot")
-            .to_string();
+        let name = std::path::Path::new(path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.clone());
         specs.push(engine::RobotSpec { name, source });
     }
 
@@ -237,8 +234,8 @@ fn cmd_run(args: &[String]) -> ExitCode {
     // Stats table.
     if !opts.quiet {
         println!(
-            "\n{:<12} {:>7} {:>7} {:>7} {:>7} {:>9} {:>9}  {}",
-            "robot", "energy", "fired", "hits", "acc%", "dealt", "taken", "notes"
+            "\n{:<12} {:>7} {:>7} {:>7} {:>7} {:>9} {:>9}  notes",
+            "robot", "energy", "fired", "hits", "acc%", "dealt", "taken"
         );
         for r in &battle.robots {
             let acc = if r.stats.fired > 0 {

@@ -5,7 +5,7 @@
 //! ```json
 //! {
 //!   "format": "tank-replay", "version": 1,
-//!   "seed": 42, "arena": {"w": 1000, "h": 700},
+//!   "seed": 42, "arena": {"w": 1000, "h": 700, "beam": 18, "tank_r": 18},
 //!   "robots": [{"name": "alpha", "color": "#e74c3c"}],
 //!   "result": {"winner": 0, "reason": "last_standing", "tick": 321},
 //!   "ticks": [
@@ -30,6 +30,12 @@ pub struct Snapshot {
 }
 
 fn num(v: f64) -> String {
+    // JSON has no NaN/infinity. The engine keeps every value finite, so this
+    // is a last line of defence that keeps the replay loadable.
+    debug_assert!(v.is_finite(), "non-finite value in replay: {}", v);
+    if !v.is_finite() {
+        return "0".to_string();
+    }
     // Two decimals, trailing zeros trimmed. Deterministic output.
     let s = format!("{:.2}", v);
     let s = s.trim_end_matches('0').trim_end_matches('.');
@@ -74,10 +80,11 @@ pub fn write_replay(battle: &Battle) -> String {
     out.push_str("{\"format\":\"tank-replay\",\"version\":1,");
     out.push_str(&format!("\"seed\":{},", battle.seed));
     out.push_str(&format!(
-        "\"arena\":{{\"w\":{},\"h\":{},\"beam\":{}}},",
+        "\"arena\":{{\"w\":{},\"h\":{},\"beam\":{},\"tank_r\":{}}},",
         num(battle.cfg.arena_w),
         num(battle.cfg.arena_h),
-        num(battle.cfg.radar_beam)
+        num(battle.cfg.radar_beam),
+        num(battle.cfg.tank_radius)
     ));
     out.push_str("\"robots\":[");
     for (i, r) in battle.robots.iter().enumerate() {

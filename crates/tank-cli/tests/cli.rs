@@ -7,6 +7,12 @@ fn tank() -> Command {
     Command::new(env!("CARGO_BIN_EXE_tank"))
 }
 
+/// A temp-file path unique to this test process, so concurrent test runs
+/// (other checkouts, other users) never share files.
+fn temp_path(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("tank-test-{}-{}", std::process::id(), name))
+}
+
 fn example(name: &str) -> String {
     format!("{}/../../examples/{}", env!("CARGO_MANIFEST_DIR"), name)
 }
@@ -20,19 +26,19 @@ fn check_accepts_examples_and_rejects_garbage() {
             .expect("run tank");
         assert!(out.status.success(), "{} failed check: {:?}", bot, out);
     }
-    let bad = std::env::temp_dir().join("tank_bad.bot");
+    let bad = temp_path("bad.bot");
     fs::write(&bad, "func main() { var x = ; }").unwrap();
     let out = tank().arg("check").arg(&bad).output().expect("run tank");
     assert!(!out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("FAIL"), "stdout: {}", stdout);
+    let _ = fs::remove_file(&bad);
 }
 
 #[test]
 fn same_seed_produces_byte_identical_replays_across_processes() {
-    let dir = std::env::temp_dir();
-    let a = dir.join("tank_det_a.json");
-    let b = dir.join("tank_det_b.json");
+    let a = temp_path("det_a.json");
+    let b = temp_path("det_b.json");
     for path in [&a, &b] {
         let out = tank()
             .args([
@@ -53,13 +59,13 @@ fn same_seed_produces_byte_identical_replays_across_processes() {
     let rb = fs::read(&b).expect("replay b");
     assert_eq!(ra.len(), rb.len());
     assert_eq!(ra, rb, "replays with the same seed must be byte-identical");
+    let _ = (fs::remove_file(&a), fs::remove_file(&b));
 }
 
 #[test]
 fn different_seeds_produce_different_replays() {
-    let dir = std::env::temp_dir();
-    let a = dir.join("tank_seed1.json");
-    let b = dir.join("tank_seed2.json");
+    let a = temp_path("seed1.json");
+    let b = temp_path("seed2.json");
     for (seed, path) in [("1", &a), ("2", &b)] {
         tank()
             .args([
@@ -76,11 +82,12 @@ fn different_seeds_produce_different_replays() {
             .expect("run tank");
     }
     assert_ne!(fs::read(&a).unwrap(), fs::read(&b).unwrap());
+    let _ = (fs::remove_file(&a), fs::remove_file(&b));
 }
 
 #[test]
 fn three_robot_battle_works() {
-    let out = std::env::temp_dir().join("tank_three.json");
+    let out = temp_path("three.json");
     let res = tank()
         .args([
             "run",
@@ -103,4 +110,8 @@ fn three_robot_battle_works() {
     let replay = fs::read_to_string(&out).unwrap();
     assert!(replay.contains("\"robots\":["));
     assert!(replay.matches("\"name\":").count() >= 3);
+    for name in ["sweeper", "tracker", "corner"] {
+        assert!(replay.contains(&format!("\"name\":\"{}\"", name)), "robot names come from file stems");
+    }
+    let _ = fs::remove_file(&out);
 }

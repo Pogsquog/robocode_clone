@@ -65,8 +65,6 @@ pub struct Battle {
     pub snapshots: Vec<Snapshot>,
     /// Robot log() output: (tick, robot id, message).
     pub logs: Vec<(u32, usize, String)>,
-    /// Robot death explosions for the replay: (tick, robot id).
-    pub explosions: Vec<(u32, usize)>,
 }
 
 impl Battle {
@@ -124,7 +122,6 @@ impl Battle {
             tick_log: Vec::new(),
             snapshots: Vec::new(),
             logs: Vec::new(),
-            explosions: Vec::new(),
         })
     }
 
@@ -176,15 +173,21 @@ impl Battle {
     }
 
     fn run_vm(&mut self, i: usize, budget: u32) {
+        let start = match &self.robots[i].vm {
+            Some(vm) => vm.ops_executed(),
+            None => return, // halted earlier
+        };
         loop {
-            let vm = self.robots[i].vm.take();
-            let mut vm = match vm {
-                Some(v) => v,
-                None => return, // halted earlier
+            let Some(mut vm) = self.robots[i].vm.take() else {
+                return;
             };
+            // One budget per tick, shared across trivial blocking calls that
+            // complete instantly (e.g. `ahead(0)`) and resume the VM below.
+            let used = vm.ops_executed() - start;
+            let remaining = u64::from(budget).saturating_sub(used) as u32;
             let outcome = {
                 let mut host = RobotHost::new(self, i);
-                vm.run(&mut host, budget)
+                vm.run(&mut host, remaining)
             };
             self.robots[i].vm = Some(vm);
             match outcome {
@@ -344,34 +347,22 @@ impl Battle {
             };
             r.radar_rel += radar_rate;
 
-            // Velocity: pending movement drives the target speed.
-            let pending = r.pending; // Copy
-            let target = match pending {
-                Some(Pending::Move { dir, .. }) => dir * cfg.max_speed,
+            // Velocity: pending movement drives the target speed, slowing
+            // in time to stop at the requested distance.
+            let target = match r.pending {
+                Some(Pending::Move { remaining, dir }) => dir * move_speed(remaining, &cfg),
                 _ => r.intent_velocity.clamp(-cfg.max_speed, cfg.max_speed),
             };
-            let diff = target - r.velocity;
-            if diff.abs() > cfg.epsilon {
-                // Accelerate slower than it decelerates.
-                let rate = if target == 0.0
-                    || (r.velocity != 0.0 && target.signum() != r.velocity.signum())
-                {
-                    cfg.decel
-                } else {
-                    cfg.accel
-                };
-                r.velocity += diff.clamp(-rate, rate);
-            } else {
-                r.velocity = target;
-            }
+            r.velocity = next_velocity(r.velocity, target, &cfg);
             // Integrate position along the body heading.
             let h = r.body_heading.to_radians();
             r.x += r.velocity * h.sin();
             r.y -= r.velocity * h.cos();
 
-            // Consume pending movement.
-            if let Some(Pending::Move { remaining, .. }) = &mut r.pending {
-                *remaining -= r.velocity.abs();
+            // Consume pending movement. Travel in the wrong direction (still
+            // braking from earlier motion) adds to the distance left.
+            if let Some(Pending::Move { remaining, dir }) = &mut r.pending {
+                *remaining -= r.velocity * *dir;
             }
 
             // Wall collision.
@@ -388,7 +379,7 @@ impl Battle {
                 if matches!(r.pending, Some(Pending::Move { .. })) {
                     r.pending = None; // wall stops the move
                 }
-                self.take_damage(i, cfg.wall_damage, "hit a wall");
+                self.take_damage(i, cfg.wall_damage);
                 let mut e = Event::empty(EventKind::Wall);
                 e.bearing = bearing;
                 self.robots[i].queue_event(&cfg, e);
@@ -451,8 +442,8 @@ impl Battle {
                         e.name = self.robots[other].name.clone();
                         self.robots[me].queue_event(&self.cfg, e);
                     }
-                    self.take_damage(a, self.cfg.collision_damage, "collided");
-                    self.take_damage(b, self.cfg.collision_damage, "collided");
+                    self.take_damage(a, self.cfg.collision_damage);
+                    self.take_damage(b, self.cfg.collision_damage);
                     self.tick_log.push(format!(
                         "{} and {} collided",
                         self.robots[a].name, self.robots[b].name
@@ -510,24 +501,27 @@ impl Battle {
                 ev.power = b_power;
                 ev.name = self.robots[b_owner].name.clone();
                 self.robots[v].queue_event(&cfg, ev);
-                // Shooter event + energy return.
-                let (ox, oy) = (self.robots[b_owner].x, self.robots[b_owner].y);
-                let mut ev = Event::empty(EventKind::BulletHit);
-                ev.x = vx;
-                ev.y = vy;
-                ev.bearing = bearing_deg(ox, oy, vx, vy);
-                ev.dist = dist(ox, oy, vx, vy);
-                ev.power = b_power;
-                ev.name = self.robots[v].name.clone();
-                self.robots[b_owner].queue_event(&cfg, ev);
-                self.robots[b_owner].energy += cfg.bullet_energy_return * b_power;
+                // Shooter event + energy return (only a live shooter
+                // benefits; stats count either way).
+                if self.robots[b_owner].alive {
+                    let (ox, oy) = (self.robots[b_owner].x, self.robots[b_owner].y);
+                    let mut ev = Event::empty(EventKind::BulletHit);
+                    ev.x = vx;
+                    ev.y = vy;
+                    ev.bearing = bearing_deg(ox, oy, vx, vy);
+                    ev.dist = dist(ox, oy, vx, vy);
+                    ev.power = b_power;
+                    ev.name = self.robots[v].name.clone();
+                    self.robots[b_owner].queue_event(&cfg, ev);
+                    self.robots[b_owner].energy += cfg.bullet_energy_return * b_power;
+                }
                 self.robots[b_owner].stats.bullet_hits += 1;
                 self.robots[b_owner].stats.damage_dealt += damage;
                 self.tick_log.push(format!(
                     "{}'s bullet hit {} for {:.1} damage",
                     self.robots[b_owner].name, self.robots[v].name, damage
                 ));
-                self.take_damage(v, damage, "was shot");
+                self.take_damage(v, damage);
                 let b = &mut self.bullets[bi];
                 b.x = vx;
                 b.y = vy;
@@ -537,7 +531,9 @@ impl Battle {
                 || ny < -cfg.tank_radius
                 || ny > cfg.arena_h + cfg.tank_radius
             {
-                self.robots[b_owner].queue_event(&cfg, Event::empty(EventKind::BulletMissed));
+                if self.robots[b_owner].alive {
+                    self.robots[b_owner].queue_event(&cfg, Event::empty(EventKind::BulletMissed));
+                }
                 let b = &mut self.bullets[bi];
                 b.x = nx;
                 b.y = ny;
@@ -548,6 +544,7 @@ impl Battle {
                 b.y = ny;
             }
         }
+        self.bullets.retain(|b| b.alive);
     }
 
     // ----- Phase 4: deaths & end ----------------------------------------------
@@ -574,7 +571,6 @@ impl Battle {
         self.robots[i].alive = false;
         self.robots[i].pending = None;
         self.robots[i].vm = None;
-        self.explosions.push((self.tick, i));
         self.tick_log
             .push(format!("{} was destroyed", self.robots[i].name));
         let name = self.robots[i].name.clone();
@@ -709,9 +705,38 @@ impl Battle {
     // ----- Damage -------------------------------------------------------------
 
     /// Apply damage and record stats. Deaths are resolved in death_phase.
-    fn take_damage(&mut self, i: usize, amount: f64, _cause: &str) {
+    fn take_damage(&mut self, i: usize, amount: f64) {
         self.robots[i].energy -= amount;
         self.robots[i].stats.damage_taken += amount;
+    }
+}
+
+/// Fastest speed at which a tank `distance` units from its goal can still
+/// brake to a stop exactly there (Robocode's getMaxVelocity, generalized to
+/// any deceleration).
+fn move_speed(distance: f64, cfg: &Config) -> f64 {
+    if distance <= 0.0 {
+        return 0.0;
+    }
+    let decel = cfg.decel;
+    // Ticks of braking needed from the speed we want to reach.
+    let t = ((((8.0 / decel) * distance + 1.0).sqrt() - 1.0) / 2.0)
+        .ceil()
+        .max(1.0);
+    let brake_dist = t / 2.0 * (t - 1.0) * decel;
+    ((t - 1.0) * decel + (distance - brake_dist) / t).min(cfg.max_speed)
+}
+
+/// One tick of velocity change toward `target`: speeding up uses `accel`;
+/// slowing down uses `decel`; reversing brakes to a stop first.
+fn next_velocity(v: f64, target: f64, cfg: &Config) -> f64 {
+    let same_dir = (v > 0.0) == (target > 0.0) && target != 0.0;
+    if v == 0.0 || (same_dir && target.abs() >= v.abs()) {
+        v + (target - v).clamp(-cfg.accel, cfg.accel)
+    } else if target == 0.0 || same_dir {
+        v + (target - v).clamp(-cfg.decel, cfg.decel)
+    } else {
+        v - v.signum() * v.abs().min(cfg.decel)
     }
 }
 
