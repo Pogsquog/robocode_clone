@@ -41,6 +41,8 @@ struct Frame {
 pub struct Vm {
     prog: Rc<Program>,
     globals: Vec<Value>,
+    /// Static arrays: sized by the program, zero-filled at start.
+    arrays: Vec<Vec<f64>>,
     stack: Vec<Value>,
     frames: Vec<Frame>,
     ip: usize,
@@ -57,9 +59,11 @@ pub struct Vm {
 impl Vm {
     pub fn new(prog: Rc<Program>) -> Vm {
         let n_globals = prog.n_globals;
+        let arrays = prog.arrays.iter().map(|a| vec![0.0; a.len]).collect();
         let mut vm = Vm {
             prog,
             globals: vec![Value::Null; n_globals],
+            arrays,
             stack: Vec::new(),
             frames: Vec::new(),
             ip: 0,
@@ -299,6 +303,28 @@ impl Vm {
                     Err(msg) => return Err(msg),
                 }
             }
+            Op::Dup => {
+                let v = self.stack.last().cloned().expect("value stack underflow");
+                self.push(v)?;
+            }
+            Op::GetElem(a) => {
+                let idx = self.pop();
+                let i = self.elem_index(a, &idx)?;
+                self.push(Value::Num(self.arrays[a as usize][i]))?;
+            }
+            Op::SetElem(a) => {
+                let v = self.pop();
+                let idx = self.pop();
+                let i = self.elem_index(a, &idx)?;
+                let Value::Num(n) = v else {
+                    return Err(format!(
+                        "array '{}' holds numbers; cannot store a {}",
+                        self.prog.arrays[a as usize].name,
+                        v.type_name()
+                    ));
+                };
+                self.arrays[a as usize][i] = n;
+            }
             Op::Return => {
                 let v = self.pop();
                 if self.frames.len() == 1 {
@@ -313,6 +339,29 @@ impl Vm {
             }
         }
         Ok(None)
+    }
+}
+
+impl Vm {
+    /// Validate an array index: a whole number within bounds.
+    fn elem_index(&self, a: u16, idx: &Value) -> Result<usize, String> {
+        let info = &self.prog.arrays[a as usize];
+        match idx {
+            Value::Num(n) if n.fract() == 0.0 && *n >= 0.0 && *n < info.len as f64 => {
+                Ok(*n as usize)
+            }
+            Value::Num(n) => Err(format!(
+                "index {} is out of range for '{}' (valid: whole numbers 0 to {})",
+                Value::Num(*n),
+                info.name,
+                info.len - 1
+            )),
+            other => Err(format!(
+                "array index must be a number, not a {} (indexing '{}')",
+                other.type_name(),
+                info.name
+            )),
+        }
     }
 }
 
@@ -683,6 +732,57 @@ mod tests {
             _args: Vec<Value>,
         ) -> Result<HostOutcome, String> {
             Ok(HostOutcome::Value(Value::Null))
+        }
+    }
+
+    #[test]
+    fn arrays_store_load_and_persist_across_functions() {
+        let logs = logged(
+            "func push_hist(v) { hist[head] = v; head = (head + 1) % len(hist); } \
+             func avg() { var s = 0; for (var i = 0; i < len(hist); i += 1) { s += hist[i]; } \
+                          return s / len(hist); } \
+             func main() { var hist[4]; var head = 0; \
+                log(hist[3]); \
+                for (var k = 1; k <= 6; k += 1) { push_hist(k); } \
+                log(hist[0] + \",\" + hist[1] + \",\" + hist[2] + \",\" + hist[3]); \
+                log(avg()); }",
+        );
+        assert_eq!(logs, vec!["0", "5,6,3,4", "4.5"]);
+    }
+
+    #[test]
+    fn compound_element_assignment_evaluates_index_once() {
+        let logs = logged(
+            "func next() { calls += 1; return 1; } \
+             func main() { var a[3]; var calls = 0; a[next()] += 5; a[next()] *= 3; \
+                           log(a[1]); log(calls); }",
+        );
+        assert_eq!(logs, vec!["15", "2"]);
+    }
+
+    #[test]
+    fn bad_array_access_faults() {
+        let cases = [
+            ("func main() { var a[4]; var x = a[4]; }", "out of range"),
+            (
+                "func main() { var a[4]; var x = a[0 - 1]; }",
+                "out of range",
+            ),
+            ("func main() { var a[4]; var x = a[1.5]; }", "out of range"),
+            (
+                "func main() { var a[4]; a[\"1\"] = 2; }",
+                "must be a number",
+            ),
+            ("func main() { var a[4]; a[0] = \"hi\"; }", "holds numbers"),
+            ("func main() { var a[4]; a[0] = true; }", "holds numbers"),
+            ("func main() { var a[4]; a[0] += \"x\"; }", "holds numbers"),
+        ];
+        for (src, want) in cases {
+            let mut vm = Vm::new(compile(src));
+            match vm.run(&mut NullHost, 1000) {
+                RunOutcome::Fault(m) => assert!(m.contains(want), "{}: {}", src, m),
+                other => panic!("{}: expected fault, got {:?}", src, other),
+            }
         }
     }
 

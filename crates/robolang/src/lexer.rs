@@ -54,6 +54,8 @@ pub enum Tok {
     RParen,
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
     Comma,
     Semi,
     Eof,
@@ -336,6 +338,8 @@ impl<'a> Lexer<'a> {
             ')' => Tok::RParen,
             '{' => Tok::LBrace,
             '}' => Tok::RBrace,
+            '[' => Tok::LBracket,
+            ']' => Tok::RBracket,
             ',' => Tok::Comma,
             ';' => Tok::Semi,
             other => {
@@ -396,6 +400,20 @@ mod tests {
         assert_eq!(
             toks("/* multi\nline */ \"a\\\"b\\n\""),
             vec![Tok::Str("a\"b\n".into()), Tok::Eof]
+        );
+    }
+
+    #[test]
+    fn brackets() {
+        assert_eq!(
+            toks("a[1]"),
+            vec![
+                Tok::Ident("a".into()),
+                Tok::LBracket,
+                Tok::Num(1.0),
+                Tok::RBracket,
+                Tok::Eof
+            ]
         );
     }
 

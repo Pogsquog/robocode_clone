@@ -19,7 +19,13 @@ fn example(name: &str) -> String {
 
 #[test]
 fn check_accepts_examples_and_rejects_garbage() {
-    for bot in ["sweeper.bot", "corner.bot", "tracker.bot", "sniper.bot"] {
+    for bot in [
+        "sweeper.bot",
+        "corner.bot",
+        "tracker.bot",
+        "sniper.bot",
+        "learner.bot",
+    ] {
         let out = tank()
             .args(["check", &example(bot)])
             .output()

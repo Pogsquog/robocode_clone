@@ -5,6 +5,11 @@
 //!   visible from all functions (and persists across ticks). Declaring the
 //!   same name twice in `main` refers to the same global.
 //! - `var x;` without an initializer sets `x` to null each time it runs.
+//! - `var a[N];` declares a fixed-size, zero-filled array of numbers. Arrays
+//!   are static: declared only at the top level of `main`, sized by a
+//!   literal, allocated once when the robot starts, and usable from every
+//!   function by indexing (`a[i]`). They cannot be copied, passed or
+//!   returned, so their total memory is known at compile time.
 //! - `var` declared inside any other function (and `for` loop variables there)
 //!   are function-locals. Parameters are locals.
 //! - Names resolve innermost-scope-first, then globals, else compile error.
@@ -42,6 +47,12 @@ pub enum Op {
     Call(u16, u8),
     HostCall(u16, u8),
     Return,
+    /// Duplicate the top of the stack.
+    Dup,
+    /// Pop an index, push that element of array N.
+    GetElem(u16),
+    /// Pop a value then an index; store the value in array N.
+    SetElem(u16),
 }
 
 #[derive(Clone, Debug)]
@@ -59,6 +70,14 @@ pub struct Program {
     pub funcs: Vec<FuncCode>,
     pub consts: Vec<Value>,
     pub n_globals: usize,
+    /// Static arrays, indexed by the id in `GetElem`/`SetElem`.
+    pub arrays: Vec<ArrayInfo>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ArrayInfo {
+    pub name: String,
+    pub len: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -72,10 +91,13 @@ const MAX_LOCALS: usize = 256;
 const MAX_FUNCS: usize = 64;
 const MAX_CONSTS: usize = 4096;
 const MAX_CODE_LEN: usize = u16::MAX as usize;
+/// Total elements across all of a program's arrays. Part of the sandbox.
+pub const MAX_ARRAY_ELEMENTS: usize = 16384;
 
 enum VarRef {
     Global(u16),
     Local(u16),
+    Array(u16),
 }
 
 struct ProgramParts {
@@ -86,6 +108,8 @@ struct ProgramParts {
     /// calls to functions compiled later).
     func_params: HashMap<u16, usize>,
     globals: HashMap<String, u16>,
+    arrays: HashMap<String, u16>,
+    array_info: Vec<ArrayInfo>,
 }
 
 struct FuncCompiler<'a> {
@@ -155,9 +179,11 @@ pub fn compile_program(ast: &crate::ast::Program) -> Result<Rc<Program>, Compile
         next += 1;
     }
 
-    // Hoist all `var` names declared in main to globals.
+    // Arrays (top level of main), then all other `var` names declared in
+    // main, become globals. They share one namespace.
+    let (arrays, array_info) = hoist_arrays(&main.body)?;
     let mut globals: HashMap<String, u16> = HashMap::new();
-    hoist_globals(&main.body, &mut globals)?;
+    hoist_globals(&main.body, &arrays, &mut globals)?;
 
     let mut parts = ProgramParts {
         consts: Vec::new(),
@@ -165,6 +191,8 @@ pub fn compile_program(ast: &crate::ast::Program) -> Result<Rc<Program>, Compile
         func_index,
         func_params,
         globals,
+        arrays,
+        array_info,
     };
 
     let mut funcs = Vec::new();
@@ -176,14 +204,70 @@ pub fn compile_program(ast: &crate::ast::Program) -> Result<Rc<Program>, Compile
         funcs,
         consts: parts.consts,
         n_globals: parts.globals.len(),
+        arrays: parts.array_info,
     }))
 }
 
-fn hoist_globals(body: &[Stmt], globals: &mut HashMap<String, u16>) -> Result<(), CompileError> {
-    fn walk(stmts: &[Stmt], globals: &mut HashMap<String, u16>) -> Result<(), CompileError> {
+fn hoist_arrays(body: &[Stmt]) -> Result<(HashMap<String, u16>, Vec<ArrayInfo>), CompileError> {
+    let mut ids = HashMap::new();
+    let mut info: Vec<ArrayInfo> = Vec::new();
+    let mut total = 0usize;
+    for s in body {
+        let Stmt::ArrayDecl { name, size, line } = s else {
+            continue;
+        };
+        let err = |msg: String| CompileError { msg, line: *line };
+        if ids.contains_key(name) {
+            return Err(err(format!("duplicate array '{}'", name)));
+        }
+        if size.fract() != 0.0 || *size < 1.0 {
+            return Err(err(format!(
+                "array size must be a whole number of at least 1, got {}",
+                Value::Num(*size)
+            )));
+        }
+        total = total.saturating_add(*size as usize);
+        if total > MAX_ARRAY_ELEMENTS {
+            return Err(err(format!(
+                "arrays are too large: {} elements in total (max {})",
+                total, MAX_ARRAY_ELEMENTS
+            )));
+        }
+        ids.insert(name.clone(), info.len() as u16);
+        info.push(ArrayInfo {
+            name: name.clone(),
+            len: *size as usize,
+        });
+    }
+    Ok((ids, info))
+}
+
+fn hoist_globals(
+    body: &[Stmt],
+    arrays: &HashMap<String, u16>,
+    globals: &mut HashMap<String, u16>,
+) -> Result<(), CompileError> {
+    fn walk(
+        stmts: &[Stmt],
+        top: bool,
+        arrays: &HashMap<String, u16>,
+        globals: &mut HashMap<String, u16>,
+    ) -> Result<(), CompileError> {
         for s in stmts {
             match s {
+                Stmt::ArrayDecl { line, .. } if !top => {
+                    return Err(CompileError {
+                        msg: "arrays must be declared at the top level of main".into(),
+                        line: *line,
+                    });
+                }
                 Stmt::Var { name, line, .. } => {
+                    if arrays.contains_key(name) {
+                        return Err(CompileError {
+                            msg: format!("'{}' is already declared as an array", name),
+                            line: *line,
+                        });
+                    }
                     if globals.contains_key(name) {
                         continue; // redeclaration: same global
                     }
@@ -196,27 +280,27 @@ fn hoist_globals(body: &[Stmt], globals: &mut HashMap<String, u16>) -> Result<()
                     globals.insert(name.clone(), globals.len() as u16);
                 }
                 Stmt::If { then, els, .. } => {
-                    walk(then, globals)?;
+                    walk(then, false, arrays, globals)?;
                     if let Some(e) = els {
-                        walk(e, globals)?;
+                        walk(e, false, arrays, globals)?;
                     }
                 }
-                Stmt::While { body, .. } => walk(body, globals)?,
+                Stmt::While { body, .. } => walk(body, false, arrays, globals)?,
                 Stmt::For {
                     init, step, body, ..
                 } => {
                     if let Some(init) = init {
-                        walk(std::slice::from_ref(init), globals)?;
+                        walk(std::slice::from_ref(init), false, arrays, globals)?;
                     }
-                    walk(step, globals)?;
-                    walk(body, globals)?;
+                    walk(step, false, arrays, globals)?;
+                    walk(body, false, arrays, globals)?;
                 }
                 _ => {}
             }
         }
         Ok(())
     }
-    walk(body, globals)
+    walk(body, true, arrays, globals)
 }
 
 fn compile_func(parts: &mut ProgramParts, decl: &FuncDecl) -> Result<FuncCode, CompileError> {
@@ -327,7 +411,32 @@ impl<'a> FuncCompiler<'a> {
                 return Some(VarRef::Local(*slot));
             }
         }
-        self.prog.globals.get(name).map(|i| VarRef::Global(*i))
+        if let Some(g) = self.prog.globals.get(name) {
+            return Some(VarRef::Global(*g));
+        }
+        self.prog.arrays.get(name).map(|a| VarRef::Array(*a))
+    }
+
+    /// Resolve `name` as an array for indexing.
+    fn resolve_array(&self, name: &str, line: u32) -> Result<u16, CompileError> {
+        match self.resolve(name) {
+            Some(VarRef::Array(a)) => Ok(a),
+            Some(_) => Err(CompileError {
+                msg: format!("'{}' is not an array", name),
+                line,
+            }),
+            None => Err(CompileError {
+                msg: format!("undefined array '{}'", name),
+                line,
+            }),
+        }
+    }
+
+    fn array_misuse(name: &str, line: u32) -> CompileError {
+        CompileError {
+            msg: format!("'{}' is an array; use an element such as {}[i]", name, name),
+            line,
+        }
     }
 
     fn block(&mut self, stmts: &[Stmt]) -> Result<(), CompileError> {
@@ -367,23 +476,21 @@ impl<'a> FuncCompiler<'a> {
                     self.emit(Op::SetLocal(slot))?;
                 }
             }
+            Stmt::ArrayDecl { line, .. } => {
+                // Allocated at startup (see hoist_arrays); no code here.
+                if !self.is_main {
+                    return Err(CompileError {
+                        msg: "arrays can only be declared in main".into(),
+                        line: *line,
+                    });
+                }
+            }
             Stmt::Assign {
-                name,
+                target,
                 op,
                 value,
                 line,
             } => {
-                let r = self.resolve(name).ok_or_else(|| CompileError {
-                    msg: format!("undefined variable '{}'", name),
-                    line: *line,
-                })?;
-                if *op != AssignOp::Set {
-                    match r {
-                        VarRef::Global(g) => self.emit(Op::GetGlobal(g))?,
-                        VarRef::Local(l) => self.emit(Op::GetLocal(l))?,
-                    };
-                }
-                self.expr(value)?;
                 let binop = match op {
                     AssignOp::Set => None,
                     AssignOp::Add => Some(Op::Add),
@@ -391,15 +498,42 @@ impl<'a> FuncCompiler<'a> {
                     AssignOp::Mul => Some(Op::Mul),
                     AssignOp::Div => Some(Op::Div),
                 };
-                if let Some(o) = binop {
-                    self.emit(o)?;
-                }
-                match r {
-                    VarRef::Global(g) => {
-                        self.emit(Op::SetGlobal(g))?;
+                match target {
+                    Target::Var(name) => {
+                        let r = self.resolve(name).ok_or_else(|| CompileError {
+                            msg: format!("undefined variable '{}'", name),
+                            line: *line,
+                        })?;
+                        if binop.is_some() {
+                            match r {
+                                VarRef::Global(g) => self.emit(Op::GetGlobal(g))?,
+                                VarRef::Local(l) => self.emit(Op::GetLocal(l))?,
+                                VarRef::Array(_) => return Err(Self::array_misuse(name, *line)),
+                            };
+                        }
+                        self.expr(value)?;
+                        if let Some(o) = binop {
+                            self.emit(o)?;
+                        }
+                        match r {
+                            VarRef::Global(g) => self.emit(Op::SetGlobal(g))?,
+                            VarRef::Local(l) => self.emit(Op::SetLocal(l))?,
+                            VarRef::Array(_) => return Err(Self::array_misuse(name, *line)),
+                        };
                     }
-                    VarRef::Local(l) => {
-                        self.emit(Op::SetLocal(l))?;
+                    Target::Index { name, index } => {
+                        let a = self.resolve_array(name, *line)?;
+                        // Stack: [index] or, for compound ops, [index, old].
+                        self.expr(index)?;
+                        if binop.is_some() {
+                            self.emit(Op::Dup)?;
+                            self.emit(Op::GetElem(a))?;
+                        }
+                        self.expr(value)?;
+                        if let Some(o) = binop {
+                            self.emit(o)?;
+                        }
+                        self.emit(Op::SetElem(a))?;
                     }
                 }
             }
@@ -551,6 +685,7 @@ impl<'a> FuncCompiler<'a> {
                 Some(VarRef::Local(l)) => {
                     self.emit(Op::GetLocal(l))?;
                 }
+                Some(VarRef::Array(_)) => return Err(Self::array_misuse(name, *line)),
                 None => {
                     return Err(CompileError {
                         msg: format!("undefined variable '{}'", name),
@@ -611,6 +746,28 @@ impl<'a> FuncCompiler<'a> {
                         self.patch(jend);
                     }
                 }
+            }
+            Expr::Index { name, index, line } => {
+                let a = self.resolve_array(name, *line)?;
+                self.expr(index)?;
+                self.emit(Op::GetElem(a))?;
+            }
+            Expr::Call { name, args, line }
+                if name == "len" && !self.prog.func_index.contains_key(name) =>
+            {
+                // Built-in, resolved at compile time: array sizes are static.
+                let a = match args.as_slice() {
+                    [Expr::Ident { name: arr, .. }] => self.resolve_array(arr, *line)?,
+                    _ => {
+                        return Err(CompileError {
+                            msg: "len() takes the name of an array, e.g. len(history)".into(),
+                            line: *line,
+                        })
+                    }
+                };
+                let n = self.prog.array_info[a as usize].len as f64;
+                let i = self.const_idx(Value::Num(n))?;
+                self.emit(Op::Const(i))?;
             }
             Expr::Call { name, args, line } => {
                 if let Some(fidx) = self.prog.func_index.get(name).copied() {
@@ -721,6 +878,71 @@ mod tests {
     #[test]
     fn var_in_for_step_in_main_is_hoisted() {
         compile("func main() { for (var i = 0; i < 2; var j = 1) { i += 1; } }").unwrap();
+    }
+
+    #[test]
+    fn compiles_arrays() {
+        let p = compile(
+            "func main() { var a[4]; var b[10]; var n = len(a) + len(b); a[1] = 2; b[a[1]] += 3; } \
+             func f(i) { return a[i]; }",
+        )
+        .unwrap();
+        assert_eq!(p.arrays.len(), 2);
+        assert_eq!((p.arrays[1].name.as_str(), p.arrays[1].len), ("b", 10));
+        assert_eq!(p.n_globals, 1, "arrays are not scalar globals");
+    }
+
+    #[test]
+    fn rejects_array_misuse() {
+        let cases = [
+            (
+                "func main() { if (true) { var a[4]; } }",
+                "top level of main",
+            ),
+            (
+                "func main() { while (true) { var a[4]; } }",
+                "top level of main",
+            ),
+            (
+                "func f() { var a[4]; } func main() { }",
+                "only be declared in main",
+            ),
+            ("func main() { var a[4]; var a[4]; }", "duplicate array"),
+            (
+                "func main() { var a[4]; var a = 1; }",
+                "already declared as an array",
+            ),
+            ("func main() { var a[0]; }", "at least 1"),
+            ("func main() { var a[2.5]; }", "whole number"),
+            ("func main() { var a[16384]; var b[1]; }", "too large"),
+            ("func main() { var a[4]; var x = a; }", "is an array"),
+            ("func main() { var a[4]; a = 1; }", "is an array"),
+            ("func main() { var a[4]; a += 1; }", "is an array"),
+            ("func main() { var a[4]; log(a); }", "is an array"),
+            ("func main() { var x = 1; x[0] = 1; }", "not an array"),
+            ("func main() { var x = y[0]; }", "undefined array"),
+            (
+                "func main() { var a[4]; var n = len(a + 1); }",
+                "len() takes",
+            ),
+            ("func main() { var n = len(z); }", "undefined array"),
+            (
+                "func f(a) { return a[0]; } func main() { var a[4]; }",
+                "not an array",
+            ),
+        ];
+        for (src, want) in cases {
+            let err = compile(src).unwrap_err();
+            assert!(
+                err.contains(want),
+                "{}: got '{}', want '{}'",
+                src,
+                err,
+                want
+            );
+        }
+        // The largest allowed total is fine.
+        compile(&format!("func main() {{ var a[{}]; }}", MAX_ARRAY_ELEMENTS)).unwrap();
     }
 
     #[test]

@@ -1,0 +1,95 @@
+// Learner: statistical ("guess factor") targeting. Stands still, and every
+// tick sends out a virtual wave, an imaginary bullet expanding at bullet
+// speed. When a wave reaches the enemy it records, in a histogram, how far
+// the enemy had moved sideways relative to where it was when the wave
+// left, then aims at the most common spot. Over a battle it learns the
+// enemy's movement pattern, however irregular.
+// Demonstrates: static arrays as a ring buffer and a histogram.
+
+func angdiff(a, b) {
+    var d = (a - b) % 360;
+    if (d > 180) { d = d - 360; }
+    if (d <= -180) { d = d + 360; }
+    return d;
+}
+
+// Launch a virtual wave from here, now, toward the enemy's bearing.
+func launch_wave(bearing, dir) {
+    wave_time[next_wave] = time();
+    wave_bearing[next_wave] = bearing;
+    wave_dir[next_wave] = dir;
+    wave_live[next_wave] = 1;
+    next_wave = (next_wave + 1) % len(wave_time);
+}
+
+// Record every live wave that has reached the enemy.
+func check_waves(bearing, dist) {
+    for (var i = 0; i < len(wave_time); i += 1) {
+        if (wave_live[i] == 1 && (time() - wave_time[i]) * BULLET_SPEED >= dist) {
+            wave_live[i] = 0;
+            // -1 = fully backwards, 0 = straight at the old position,
+            // +1 = as far forward as the enemy could possibly get.
+            var gf = angdiff(bearing, wave_bearing[i]) * wave_dir[i] / MAX_ESCAPE;
+            gf = max(-1, min(1, gf));
+            // Nearest bin (x - x % 1 rounds down a non-negative x).
+            var b = (gf + 1) / 2 * (len(bins) - 1) + 0.5;
+            bins[b - b % 1] += 1;
+        }
+    }
+}
+
+// Guess factor of the most visited bin.
+func best_gf() {
+    var best = (len(bins) - 1) / 2;
+    for (var i = 0; i < len(bins); i += 1) {
+        if (bins[i] > bins[best]) { best = i; }
+    }
+    return best / (len(bins) - 1) * 2 - 1;
+}
+
+func on_scan() {
+    var bearing = event_bearing();
+    // Which way the enemy is moving across my line of sight.
+    var lateral = event_velocity() * sin(event_heading() - bearing);
+    if (lateral > 0) { dir = 1; }
+    if (lateral < 0) { dir = -1; }
+
+    check_waves(bearing, event_dist());
+    launch_wave(bearing, dir);
+
+    var aim = bearing + dir * best_gf() * MAX_ESCAPE;
+    var diff = angdiff(aim, gun_heading());
+    set_gun_rate(diff * 3);
+    if (abs(diff) < 2 && gun_heat() <= 0) {
+        fire(POWER);
+    }
+    // Keep the radar locked on.
+    set_radar_rate(angdiff(bearing, radar_heading()) * 3);
+}
+
+func main() {
+    var POWER = 2;
+    var BULLET_SPEED = 20 - 4 * POWER;
+    // asin(max_speed / bullet speed) = asin(8 / 12): the widest angle the
+    // enemy can move off its bearing before a bullet arrives.
+    var MAX_ESCAPE = 41.8;
+
+    var bins[31];
+    var wave_time[100];
+    var wave_bearing[100];
+    var wave_dir[100];
+    var wave_live[100];
+    var next_wave = 0;
+    var dir = 1;
+
+    set_radar_rate(45);
+    while (true) {
+        var e = pop_event();
+        if (e == "scanned") {
+            on_scan();
+        } else {
+            set_radar_rate(45);
+        }
+        await_tick();
+    }
+}

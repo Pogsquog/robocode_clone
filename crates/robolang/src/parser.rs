@@ -142,16 +142,9 @@ impl Parser {
         let line = self.line();
         match self.peek() {
             Tok::Var => {
-                self.bump();
-                let name = self.expect_ident("variable name")?;
-                let init = if matches!(self.peek(), Tok::Assign) {
-                    self.bump();
-                    Some(self.expression()?)
-                } else {
-                    None
-                };
+                let decl = self.var_decl()?;
                 self.expect(&Tok::Semi, "';'")?;
-                Ok(Stmt::Var { name, init, line })
+                Ok(decl)
             }
             Tok::If => {
                 self.bump();
@@ -248,49 +241,67 @@ impl Parser {
     fn simple_statement(&mut self) -> Result<Stmt, SyntaxError> {
         let line = self.line();
         if matches!(self.peek(), Tok::Var) {
-            self.bump();
-            let name = self.expect_ident("variable name")?;
-            let init = if matches!(self.peek(), Tok::Assign) {
-                self.bump();
-                Some(self.expression()?)
-            } else {
-                None
-            };
-            return Ok(Stmt::Var { name, init, line });
+            return self.var_decl();
         }
-        // Look ahead for `ident <assign-op>`.
-        let is_assign = matches!(self.peek(), Tok::Ident(_))
-            && matches!(
-                self.tokens.get(self.pos + 1).map(|t| &t.tok),
-                Some(Tok::Assign)
-                    | Some(Tok::PlusAssign)
-                    | Some(Tok::MinusAssign)
-                    | Some(Tok::StarAssign)
-                    | Some(Tok::SlashAssign)
-            );
-        if is_assign {
-            let name = self.expect_ident("variable name")?;
-            let op = match self.bump() {
-                Tok::Assign => AssignOp::Set,
-                Tok::PlusAssign => AssignOp::Add,
-                Tok::MinusAssign => AssignOp::Sub,
-                Tok::StarAssign => AssignOp::Mul,
-                Tok::SlashAssign => AssignOp::Div,
-                _ => unreachable!(),
-            };
-            let value = self.expression()?;
-            Ok(Stmt::Assign {
+        let expr = self.expression()?;
+        let op = match self.peek() {
+            Tok::Assign => AssignOp::Set,
+            Tok::PlusAssign => AssignOp::Add,
+            Tok::MinusAssign => AssignOp::Sub,
+            Tok::StarAssign => AssignOp::Mul,
+            Tok::SlashAssign => AssignOp::Div,
+            _ => return Ok(Stmt::Expr { expr, line }),
+        };
+        let target = match expr {
+            Expr::Ident { name, .. } => Target::Var(name),
+            Expr::Index { name, index, .. } => Target::Index {
                 name,
-                op,
-                value,
-                line,
-            })
-        } else {
-            Ok(Stmt::Expr {
-                expr: self.expression()?,
-                line,
-            })
+                index: *index,
+            },
+            _ => return Err(self.err("can only assign to a variable or an array element".into())),
+        };
+        self.bump();
+        let value = self.expression()?;
+        Ok(Stmt::Assign {
+            target,
+            op,
+            value,
+            line,
+        })
+    }
+
+    /// `var name [= expr]` or `var name[size]`, without the semicolon.
+    fn var_decl(&mut self) -> Result<Stmt, SyntaxError> {
+        let line = self.line();
+        self.expect(&Tok::Var, "'var'")?;
+        let name = self.expect_ident("variable name")?;
+        if matches!(self.peek(), Tok::LBracket) {
+            self.bump();
+            let size = match self.peek() {
+                Tok::Num(n) => *n,
+                _ => {
+                    return Err(self.err(format!(
+                        "array size must be a number literal, found {}",
+                        self.describe()
+                    )))
+                }
+            };
+            self.bump();
+            self.expect(&Tok::RBracket, "']'")?;
+            if matches!(self.peek(), Tok::Assign) {
+                return Err(
+                    self.err("arrays cannot have an initializer; every element starts as 0".into())
+                );
+            }
+            return Ok(Stmt::ArrayDecl { name, size, line });
         }
+        let init = if matches!(self.peek(), Tok::Assign) {
+            self.bump();
+            Some(self.expression()?)
+        } else {
+            None
+        };
+        Ok(Stmt::Var { name, init, line })
     }
 
     fn expression(&mut self) -> Result<Expr, SyntaxError> {
@@ -507,6 +518,15 @@ impl Parser {
                     }
                     self.expect(&Tok::RParen, "')'")?;
                     Ok(Expr::Call { name, args, line })
+                } else if matches!(self.peek(), Tok::LBracket) {
+                    self.bump();
+                    let index = self.expression()?;
+                    self.expect(&Tok::RBracket, "']'")?;
+                    Ok(Expr::Index {
+                        name,
+                        index: Box::new(index),
+                        line,
+                    })
                 } else {
                     Ok(Expr::Ident { name, line })
                 }
@@ -535,6 +555,46 @@ mod tests {
     #[test]
     fn rejects_missing_semi() {
         assert!(parse("func main() { var x = 1 }").is_err());
+    }
+
+    #[test]
+    fn parses_arrays() {
+        let prog =
+            parse("func main() { var a[8]; a[0] = 1; a[1 + 1] += a[0] * 2; log(a[2]); }").unwrap();
+        let body = &prog.funcs[0].body;
+        assert!(
+            matches!(body[0], Stmt::ArrayDecl { ref name, size, .. } if name == "a" && size == 8.0)
+        );
+        assert!(matches!(
+            body[1],
+            Stmt::Assign {
+                target: Target::Index { .. },
+                op: AssignOp::Set,
+                ..
+            }
+        ));
+        assert!(matches!(
+            body[2],
+            Stmt::Assign {
+                target: Target::Index { .. },
+                op: AssignOp::Add,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_bad_array_syntax() {
+        for src in [
+            "func main() { var a[n]; }",
+            "func main() { var a[4] = 1; }",
+            "func main() { var a[4; }",
+            "func main() { var a[4]; a[0 = 1; }",
+            "func main() { f()[0] = 1; }",
+            "func main() { a + 1 = 2; }",
+        ] {
+            assert!(parse(src).is_err(), "{}", src);
+        }
     }
 
     #[test]

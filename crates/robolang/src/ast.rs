@@ -22,8 +22,14 @@ pub enum Stmt {
         init: Option<Expr>,
         line: u32,
     },
-    Assign {
+    /// `var name[size];` — a fixed-size array of numbers (main only).
+    ArrayDecl {
         name: String,
+        size: f64,
+        line: u32,
+    },
+    Assign {
+        target: Target,
         op: AssignOp,
         value: Expr,
         line: u32,
@@ -62,6 +68,13 @@ pub enum Stmt {
     },
 }
 
+/// What an assignment writes to.
+#[derive(Clone, Debug)]
+pub enum Target {
+    Var(String),
+    Index { name: String, index: Expr },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AssignOp {
     Set,
@@ -78,6 +91,12 @@ pub enum Expr {
     Str(String),
     Ident {
         name: String,
+        line: u32,
+    },
+    /// `name[index]`
+    Index {
+        name: String,
+        index: Box<Expr>,
         line: u32,
     },
     Unary {

@@ -72,6 +72,40 @@ func name(param1, param2) { ... return value; }
   `break;`, `continue;`, `return;` / `return expr;`.
 - Comments: `// line` and `/* block */`.
 
+### Arrays
+
+Arrays hold a robot's longer-term memory: a history of enemy positions, a
+histogram of where its shots should have gone, a grid of the arena.
+
+```
+func main() {
+    var hist[32];                  // 32 numbers, all starting at 0
+    var head = 0;
+    ...
+    hist[head] = event_x();        // store
+    head = (head + 1) % len(hist); // len() is the declared size
+    avg_x = (hist[0] + hist[1]) / 2;
+}
+```
+
+Arrays are deliberately simple:
+
+- **Declared at the top level of `main`** with a literal size:
+  `var name[N];`. Like other variables in `main` they are global: every
+  function can use them by name. They are created once, when the robot
+  starts, with every element `0`; the declaration line itself does
+  nothing when it runs.
+- **Numbers only.** Storing a string, boolean or null forfeits the robot.
+- **Indexed from 0** with whole numbers: `a[i]`, `a[i] = v`, and
+  `a[i] += v` (also `-=`, `*=`, `/=`). An index that is out of range or
+  not a whole number forfeits the robot.
+- **Not values.** An array can't be copied, compared, logged, passed to a
+  function or returned; only its elements can be used. For a grid, use
+  one array with `grid[y * width + x]`.
+
+See `examples/learner.bot` for a gun that learns an enemy's movement with
+two arrays: a ring buffer of "virtual waves" and a histogram.
+
 ### The sandbox
 
 | Limit | Value |
@@ -81,6 +115,7 @@ func name(param1, param2) { ... return value; }
 | Call depth | 96 |
 | Value stack | 4,096 |
 | Globals / locals / functions | 256 / 256 / 64 |
+| Array elements (all arrays together) | 16,384 |
 | Nesting depth (blocks, parentheses, operator chains) | 100 |
 | String length | 256 bytes |
 | Source size | 256 KB |
@@ -214,3 +249,4 @@ aim there instead — see `examples/sniper.bot`.
 | `examples/corner.bot` | blocking navigation to a corner, then radar lock |
 | `examples/tracker.bot` | radar + gun lock, continuous fire, dodge wiggle |
 | `examples/sniper.bot` | stationary lead-targeting sharpshooter |
+| `examples/learner.bot` | statistical ("guess factor") gun that learns movement patterns, using arrays |
