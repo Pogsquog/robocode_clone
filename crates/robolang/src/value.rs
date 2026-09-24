@@ -2,6 +2,11 @@
 
 use std::fmt;
 
+/// Longest string a program can create, in bytes. Part of the sandbox:
+/// together with the stack, local and global caps it bounds the memory
+/// strings can use, so concatenation cannot exhaust host memory.
+pub const MAX_STRING_LEN: usize = 256;
+
 /// A robolang value. The language is small on purpose: numbers, booleans and
 /// strings. `Null` is the result of void operations (e.g. `turn_body(30)`).
 #[derive(Clone, Debug, PartialEq)]

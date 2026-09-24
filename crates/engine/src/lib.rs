@@ -273,6 +273,22 @@ mod tests {
     }
 
     #[test]
+    fn string_doubling_cannot_exhaust_host_memory() {
+        // Previously aborted the host with out-of-memory within ~30 ticks.
+        let mut b = sandbox_battle(
+            "func main() { var s = \"ab\"; while (true) { s = s + s; await_tick(); } }",
+        );
+        b.run();
+        assert!(!b.robots[0].alive);
+        assert!(b.robots[0]
+            .fault
+            .as_deref()
+            .unwrap()
+            .contains("string too long"));
+        assert!(b.tick < 20, "forfeited at tick {}", b.tick);
+    }
+
+    #[test]
     fn nan_comparison_in_robot_code_is_harmless() {
         let mut b = sandbox_battle(
             "func main() { var n = sqrt(0 - 1); if (n < 1 || n >= 1) { fire(1); } \

@@ -186,7 +186,19 @@ impl<'a> Lexer<'a> {
             }
             let c = self.bump();
             match c {
-                '"' => return Ok(s),
+                '"' => {
+                    if s.len() > crate::value::MAX_STRING_LEN {
+                        return Err(SyntaxError::new(
+                            format!(
+                                "string literal too long ({} bytes; the limit is {})",
+                                s.len(),
+                                crate::value::MAX_STRING_LEN
+                            ),
+                            self.line,
+                        ));
+                    }
+                    return Ok(s);
+                }
                 '\\' => {
                     if self.pos >= self.chars.len() {
                         return Err(SyntaxError::new("unterminated escape", self.line));
@@ -385,6 +397,14 @@ mod tests {
             toks("/* multi\nline */ \"a\\\"b\\n\""),
             vec![Tok::Str("a\"b\n".into()), Tok::Eof]
         );
+    }
+
+    #[test]
+    fn rejects_overlong_string_literal() {
+        let src = format!("\"{}\"", "a".repeat(crate::value::MAX_STRING_LEN + 1));
+        assert!(lex(&src).unwrap_err().msg.contains("too long"));
+        let ok = format!("\"{}\"", "a".repeat(crate::value::MAX_STRING_LEN));
+        assert!(lex(&ok).is_ok());
     }
 
     #[test]

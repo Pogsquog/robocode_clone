@@ -9,7 +9,7 @@
 
 use crate::compile::{Op, Program};
 use crate::host::{BlockRequest, Host, HostOutcome};
-use crate::value::Value;
+use crate::value::{Value, MAX_STRING_LEN};
 use std::rc::Rc;
 
 /// Hard limits; part of the sandbox.
@@ -186,7 +186,15 @@ impl Vm {
                 let v = match (&a, &b) {
                     (Value::Num(x), Value::Num(y)) => Value::Num(x + y),
                     (Value::Str(_), _) | (_, Value::Str(_)) => {
-                        Value::Str(format!("{}{}", a.to_display(), b.to_display()))
+                        let (x, y) = (a.to_display(), b.to_display());
+                        if x.len() + y.len() > MAX_STRING_LEN {
+                            return Err(format!(
+                                "string too long ({} bytes; the limit is {})",
+                                x.len() + y.len(),
+                                MAX_STRING_LEN
+                            ));
+                        }
+                        Value::Str(x + &y)
                     }
                     _ => {
                         return Err(format!(
@@ -647,6 +655,35 @@ mod tests {
             RunOutcome::Blocked(_)
         ));
         assert!(matches!(vm.run(&mut BlockHost, 100), RunOutcome::Fault(_)));
+    }
+
+    #[test]
+    fn string_growth_is_capped() {
+        let prog = compile("func main() { var s = \"ab\"; while (true) { s = s + s; } }");
+        let mut vm = Vm::new(prog);
+        let out = vm.run(&mut NullHost, 100_000);
+        assert!(
+            matches!(out, RunOutcome::Fault(ref m) if m.contains("string too long")),
+            "{:?}",
+            out
+        );
+        // Right up to the limit is fine.
+        let logs = logged(&format!(
+            "func main() {{ var s = \"{}\"; log(s + \"b\"); }}",
+            "a".repeat(MAX_STRING_LEN - 1)
+        ));
+        assert_eq!(logs[0].len(), MAX_STRING_LEN);
+    }
+
+    struct NullHost;
+    impl Host for NullHost {
+        fn call(
+            &mut self,
+            _f: crate::host::HostFn,
+            _args: Vec<Value>,
+        ) -> Result<HostOutcome, String> {
+            Ok(HostOutcome::Value(Value::Null))
+        }
     }
 
     #[test]

@@ -82,6 +82,7 @@ func name(param1, param2) { ... return value; }
 | Value stack | 4,096 |
 | Globals / locals / functions | 256 / 256 / 64 |
 | Nesting depth (blocks, parentheses, operator chains) | 100 |
+| String length | 256 bytes |
 | Source size | 256 KB |
 
 An infinite loop that never calls a blocking function burns the instruction
