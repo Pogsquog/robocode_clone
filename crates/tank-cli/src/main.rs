@@ -202,19 +202,23 @@ fn cmd_run(args: &[String]) -> ExitCode {
 
     println!(
         "battle: {} | seed {} | max {} ticks",
-        specs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(" vs "),
+        specs
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>()
+            .join(" vs "),
         seed,
         opts.max_ticks
     );
 
-    let mut battle = match engine::Battle::new(engine::Config::default(), &specs, seed, opts.max_ticks)
-    {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("{}", e);
-            return ExitCode::FAILURE;
-        }
-    };
+    let mut battle =
+        match engine::Battle::new(engine::Config::default(), &specs, seed, opts.max_ticks) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("{}", e);
+                return ExitCode::FAILURE;
+            }
+        };
     battle.run();
 
     // Result.
@@ -279,6 +283,9 @@ fn cmd_run(args: &[String]) -> ExitCode {
         eprintln!("cannot write replay '{}': {}", opts.out, e);
         return ExitCode::FAILURE;
     }
-    println!("\nreplay written to {} (open viewer/index.html to watch)", opts.out);
+    println!(
+        "\nreplay written to {} (open viewer/index.html to watch)",
+        opts.out
+    );
     ExitCode::SUCCESS
 }

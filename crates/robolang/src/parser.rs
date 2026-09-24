@@ -262,7 +262,11 @@ impl Parser {
         let is_assign = matches!(self.peek(), Tok::Ident(_))
             && matches!(
                 self.tokens.get(self.pos + 1).map(|t| &t.tok),
-                Some(Tok::Assign) | Some(Tok::PlusAssign) | Some(Tok::MinusAssign) | Some(Tok::StarAssign) | Some(Tok::SlashAssign)
+                Some(Tok::Assign)
+                    | Some(Tok::PlusAssign)
+                    | Some(Tok::MinusAssign)
+                    | Some(Tok::StarAssign)
+                    | Some(Tok::SlashAssign)
             );
         if is_assign {
             let name = self.expect_ident("variable name")?;
@@ -518,10 +522,7 @@ mod tests {
 
     #[test]
     fn parses_simple_program() {
-        let prog = parse(
-            "func main() { var i = 0; while (i < 3) { i += 1; } log(i); }",
-        )
-        .unwrap();
+        let prog = parse("func main() { var i = 0; while (i < 3) { i += 1; } log(i); }").unwrap();
         assert_eq!(prog.funcs.len(), 1);
         assert_eq!(prog.funcs[0].name, "main");
     }
@@ -574,7 +575,10 @@ mod tests {
         );
         let prog = parse(&src).unwrap();
         crate::compile::compile_program(&prog).unwrap();
-        let src = format!("func main() {{ var x = 1{}; }}", " + 1".repeat(MAX_NESTING - 3));
+        let src = format!(
+            "func main() {{ var x = 1{}; }}",
+            " + 1".repeat(MAX_NESTING - 3)
+        );
         crate::compile::compile_program(&parse(&src).unwrap()).unwrap();
     }
 

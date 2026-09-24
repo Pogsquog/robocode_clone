@@ -121,7 +121,9 @@ impl Vm {
     pub fn run(&mut self, host: &mut dyn Host, budget: u32) -> RunOutcome {
         if self.blocked {
             let Some(v) = self.resume.take() else {
-                return RunOutcome::Fault("internal error: run() while blocked without resume()".into());
+                return RunOutcome::Fault(
+                    "internal error: run() while blocked without resume()".into(),
+                );
             };
             self.blocked = false;
             // The blocking call's result becomes its return value.
@@ -304,7 +306,6 @@ impl Vm {
         }
         Ok(None)
     }
-
 }
 
 fn two_nums(a: &Value, b: &Value, what: &str) -> Result<(f64, f64), String> {
@@ -379,13 +380,19 @@ mod tests {
     }
 
     impl Host for MockHost {
-        fn call(&mut self, f: crate::host::HostFn, args: Vec<Value>) -> Result<HostOutcome, String> {
+        fn call(
+            &mut self,
+            f: crate::host::HostFn,
+            args: Vec<Value>,
+        ) -> Result<HostOutcome, String> {
             let name = crate::host::HOST_FN_TABLE
                 .iter()
                 .find(|(hf, _, _)| *hf == f)
                 .map(|(_, n, _)| *n)
                 .unwrap_or("?");
-            self.calls.borrow_mut().push((name.to_string(), args.clone()));
+            self.calls
+                .borrow_mut()
+                .push((name.to_string(), args.clone()));
             if self.block_on == Some(name) && !*self.blocked.borrow() {
                 *self.blocked.borrow_mut() = true;
                 return Ok(HostOutcome::Block(match name {
@@ -518,16 +525,19 @@ mod tests {
                 Ok(HostOutcome::Value(Value::Num(42.0)))
             }
         }
-        let prog = compile(
-            "func main() { var a = await_tick(); var b = await_tick(); log(a + b); }",
-        );
+        let prog =
+            compile("func main() { var a = await_tick(); var b = await_tick(); log(a + b); }");
         let mut vm = Vm::new(prog);
         let mut host = BlockingHost;
         let out = vm.run(&mut host, 1000);
         assert!(matches!(out, RunOutcome::Blocked(BlockRequest::AwaitTick)));
         vm.resume(Value::Num(1.0));
         let out = vm.run(&mut host, 1000);
-        assert!(matches!(out, RunOutcome::Blocked(BlockRequest::AwaitTick)), "got {:?}", out);
+        assert!(
+            matches!(out, RunOutcome::Blocked(BlockRequest::AwaitTick)),
+            "got {:?}",
+            out
+        );
         vm.resume(Value::Num(2.0));
         let out = vm.run(&mut host, 1000);
         assert!(matches!(out, RunOutcome::Halted), "got {:?}", out);
@@ -556,7 +566,8 @@ mod tests {
             }
         }
         // And it must halt when a finite loop is used.
-        let prog2 = compile("func main() { var x = 0; for (var i = 0; i < 50; i += 1) { x += 2; } }");
+        let prog2 =
+            compile("func main() { var x = 0; for (var i = 0; i < 50; i += 1) { x += 2; } }");
         let mut vm2 = Vm::new(prog2);
         let mut done = false;
         let mut rounds = 0;
@@ -586,7 +597,11 @@ mod tests {
             }
         }
         let out = vm.run(&mut NopHost, 1000);
-        assert!(matches!(out, RunOutcome::Fault(ref m) if m.contains("zero")), "{:?}", out);
+        assert!(
+            matches!(out, RunOutcome::Fault(ref m) if m.contains("zero")),
+            "{:?}",
+            out
+        );
     }
 
     #[test]
@@ -600,16 +615,17 @@ mod tests {
 
     #[test]
     fn string_concat() {
-        let logs = logged(
-            "func main() { var s = \"a\" + 1 + true; log(s); log(\"x\" == \"x\"); }",
-        );
+        let logs = logged("func main() { var s = \"a\" + 1 + true; log(s); log(\"x\" == \"x\"); }");
         assert_eq!(logs, vec!["a1true", "true"]);
     }
 
     #[test]
     fn nan_comparisons_are_false_not_a_panic() {
         for op in [Op::Lt, Op::Le, Op::Gt, Op::Ge] {
-            assert_eq!(compare(&Value::Num(f64::NAN), &Value::Num(1.0), op), Ok(false));
+            assert_eq!(
+                compare(&Value::Num(f64::NAN), &Value::Num(1.0), op),
+                Ok(false)
+            );
         }
     }
 
@@ -626,7 +642,10 @@ mod tests {
             }
         }
         let mut vm = Vm::new(compile("func main() { ahead(5); }"));
-        assert!(matches!(vm.run(&mut BlockHost, 100), RunOutcome::Blocked(_)));
+        assert!(matches!(
+            vm.run(&mut BlockHost, 100),
+            RunOutcome::Blocked(_)
+        ));
         assert!(matches!(vm.run(&mut BlockHost, 100), RunOutcome::Fault(_)));
     }
 

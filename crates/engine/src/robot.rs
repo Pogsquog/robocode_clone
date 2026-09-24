@@ -11,11 +11,22 @@ use std::collections::VecDeque;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Pending {
     /// Move `remaining` units forward (`dir = 1`) or backward (`dir = -1`).
-    Move { remaining: f64, dir: f64 },
-    TurnBody { remaining: f64 },
-    TurnGun { remaining: f64 },
-    TurnRadar { remaining: f64 },
-    AwaitTick { n: u32 },
+    Move {
+        remaining: f64,
+        dir: f64,
+    },
+    TurnBody {
+        remaining: f64,
+    },
+    TurnGun {
+        remaining: f64,
+    },
+    TurnRadar {
+        remaining: f64,
+    },
+    AwaitTick {
+        n: u32,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -83,8 +94,7 @@ impl Robot {
 
     /// Max body turn rate at the current speed.
     pub fn body_rate_limit(&self, cfg: &Config) -> f64 {
-        (cfg.max_body_rate - cfg.body_rate_speed_factor * self.velocity.abs())
-            .max(0.0)
+        (cfg.max_body_rate - cfg.body_rate_speed_factor * self.velocity.abs()).max(0.0)
     }
 }
 

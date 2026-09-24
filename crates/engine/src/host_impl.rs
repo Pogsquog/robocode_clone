@@ -76,14 +76,14 @@ impl<'a> Host for RobotHost<'a> {
         // Blocking motion and firing are handled without holding robot borrows.
         match f {
             Ahead => {
-                return Ok(HostOutcome::Block(robolang::BlockRequest::Ahead(
-                    num_arg(&args, 0, "ahead")?,
-                )))
+                return Ok(HostOutcome::Block(robolang::BlockRequest::Ahead(num_arg(
+                    &args, 0, "ahead",
+                )?)))
             }
             Back => {
-                return Ok(HostOutcome::Block(robolang::BlockRequest::Back(
-                    num_arg(&args, 0, "back")?,
-                )))
+                return Ok(HostOutcome::Block(robolang::BlockRequest::Back(num_arg(
+                    &args, 0, "back",
+                )?)))
             }
             TurnBody => {
                 return Ok(HostOutcome::Block(robolang::BlockRequest::TurnBody(
@@ -257,14 +257,18 @@ impl<'a> Host for RobotHost<'a> {
             Cos => Ok(HostOutcome::Value(Value::Num(
                 num_arg(&args, 0, "cos")?.to_radians().cos(),
             ))),
-            Abs => Ok(HostOutcome::Value(Value::Num(num_arg(&args, 0, "abs")?.abs()))),
+            Abs => Ok(HostOutcome::Value(Value::Num(
+                num_arg(&args, 0, "abs")?.abs(),
+            ))),
             Min => Ok(HostOutcome::Value(Value::Num(
                 num_arg(&args, 0, "min")?.min(num_arg(&args, 1, "min")?),
             ))),
             Max => Ok(HostOutcome::Value(Value::Num(
                 num_arg(&args, 0, "max")?.max(num_arg(&args, 1, "max")?),
             ))),
-            Sqrt => Ok(HostOutcome::Value(Value::Num(num_arg(&args, 0, "sqrt")?.sqrt()))),
+            Sqrt => Ok(HostOutcome::Value(Value::Num(
+                num_arg(&args, 0, "sqrt")?.sqrt(),
+            ))),
             NormDeg => Ok(HostOutcome::Value(Value::Num(norm_deg(num_arg(
                 &args, 0, "norm_deg",
             )?)))),
@@ -272,7 +276,9 @@ impl<'a> Host for RobotHost<'a> {
                 let tx = num_arg(&args, 0, "bearing_to")?;
                 let ty = num_arg(&args, 1, "bearing_to")?;
                 let r = &self.battle.robots[id];
-                Ok(HostOutcome::Value(Value::Num(bearing_deg(r.x, r.y, tx, ty))))
+                Ok(HostOutcome::Value(Value::Num(bearing_deg(
+                    r.x, r.y, tx, ty,
+                ))))
             }
 
             // Handled above; unreachable here.

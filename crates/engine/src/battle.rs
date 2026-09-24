@@ -82,8 +82,12 @@ impl Battle {
         let mut robots = Vec::with_capacity(specs.len());
         let mut rng = Rng::new(seed);
         for (i, spec) in specs.iter().enumerate() {
-            let prog = robolang::compile(&spec.source)
-                .map_err(|e| format!("robot '{}' failed to compile: {} (line {})", spec.name, e.msg, e.line))?;
+            let prog = robolang::compile(&spec.source).map_err(|e| {
+                format!(
+                    "robot '{}' failed to compile: {} (line {})",
+                    spec.name, e.msg, e.line
+                )
+            })?;
             robots.push(Robot {
                 id: i,
                 name: spec.name.clone(),
@@ -343,7 +347,9 @@ impl Battle {
                     *remaining -= d;
                     d
                 }
-                _ => r.intent_radar_rate.clamp(-cfg.max_radar_rate, cfg.max_radar_rate),
+                _ => r
+                    .intent_radar_rate
+                    .clamp(-cfg.max_radar_rate, cfg.max_radar_rate),
             };
             r.radar_rel += radar_rate;
 
@@ -414,10 +420,8 @@ impl Battle {
                     // Clamp both back inside the arena.
                     let m = self.cfg.tank_radius;
                     for idx in [a, b] {
-                        self.robots[idx].x =
-                            self.robots[idx].x.clamp(m, self.cfg.arena_w - m);
-                        self.robots[idx].y =
-                            self.robots[idx].y.clamp(m, self.cfg.arena_h - m);
+                        self.robots[idx].x = self.robots[idx].x.clamp(m, self.cfg.arena_w - m);
+                        self.robots[idx].y = self.robots[idx].y.clamp(m, self.cfg.arena_h - m);
                         self.robots[idx].velocity = 0.0;
                         if matches!(self.robots[idx].pending, Some(Pending::Move { .. })) {
                             self.robots[idx].pending = None;

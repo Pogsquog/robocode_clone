@@ -135,7 +135,10 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     let mut closed = false;
                     while self.pos < self.chars.len() {
-                        if self.peek() == '*' && self.pos + 1 < self.chars.len() && self.chars[self.pos + 1] == '/' {
+                        if self.peek() == '*'
+                            && self.pos + 1 < self.chars.len()
+                            && self.chars[self.pos + 1] == '/'
+                        {
                             self.bump();
                             self.bump();
                             closed = true;
@@ -159,7 +162,11 @@ impl<'a> Lexer<'a> {
         while self.pos < self.chars.len() && self.peek().is_ascii_digit() {
             s.push(self.bump());
         }
-        if self.pos < self.chars.len() && self.peek() == '.' && self.pos + 1 < self.chars.len() && self.chars[self.pos + 1].is_ascii_digit() {
+        if self.pos < self.chars.len()
+            && self.peek() == '.'
+            && self.pos + 1 < self.chars.len()
+            && self.chars[self.pos + 1].is_ascii_digit()
+        {
             s.push(self.bump());
             while self.pos < self.chars.len() && self.peek().is_ascii_digit() {
                 s.push(self.bump());
@@ -204,7 +211,9 @@ impl<'a> Lexer<'a> {
 
     fn ident(&mut self) -> Tok {
         let mut s = String::new();
-        while self.pos < self.chars.len() && (self.peek().is_ascii_alphanumeric() || self.peek() == '_') {
+        while self.pos < self.chars.len()
+            && (self.peek().is_ascii_alphanumeric() || self.peek() == '_')
+        {
             s.push(self.bump());
         }
         match s.as_str() {
@@ -295,14 +304,20 @@ impl<'a> Lexer<'a> {
                 if two(self, '&') {
                     Tok::AndAnd
                 } else {
-                    return Err(SyntaxError::new("unexpected '&', did you mean '&&'?", self.line));
+                    return Err(SyntaxError::new(
+                        "unexpected '&', did you mean '&&'?",
+                        self.line,
+                    ));
                 }
             }
             '|' => {
                 if two(self, '|') {
                     Tok::OrOr
                 } else {
-                    return Err(SyntaxError::new("unexpected '|', did you mean '||'?", self.line));
+                    return Err(SyntaxError::new(
+                        "unexpected '|', did you mean '||'?",
+                        self.line,
+                    ));
                 }
             }
             '(' => Tok::LParen,
@@ -312,7 +327,10 @@ impl<'a> Lexer<'a> {
             ',' => Tok::Comma,
             ';' => Tok::Semi,
             other => {
-                return Err(SyntaxError::new(format!("unexpected character '{}'", other), self.line))
+                return Err(SyntaxError::new(
+                    format!("unexpected character '{}'", other),
+                    self.line,
+                ))
             }
         })
     }

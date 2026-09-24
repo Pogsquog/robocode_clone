@@ -122,15 +122,16 @@ pub fn compile_program(ast: &crate::ast::Program) -> Result<Rc<Program>, Compile
     let mut func_index: HashMap<String, u16> = HashMap::new();
     let mut func_params: HashMap<u16, usize> = HashMap::new();
 
-    let insert = |i: u16, f: &FuncDecl, func_index: &mut HashMap<String, u16>| -> Result<(), CompileError> {
-        if func_index.insert(f.name.clone(), i).is_some() {
-            return Err(CompileError {
-                msg: format!("duplicate function '{}'", f.name),
-                line: f.line,
-            });
-        }
-        Ok(())
-    };
+    let insert =
+        |i: u16, f: &FuncDecl, func_index: &mut HashMap<String, u16>| -> Result<(), CompileError> {
+            if func_index.insert(f.name.clone(), i).is_some() {
+                return Err(CompileError {
+                    msg: format!("duplicate function '{}'", f.name),
+                    line: f.line,
+                });
+            }
+            Ok(())
+        };
 
     let main = ast
         .funcs
@@ -347,12 +348,15 @@ impl<'a> FuncCompiler<'a> {
         match s {
             Stmt::Var { name, init, line } => {
                 if self.is_main {
-                    let g = self.prog.globals.get(name).copied().ok_or_else(|| {
-                        CompileError {
+                    let g = self
+                        .prog
+                        .globals
+                        .get(name)
+                        .copied()
+                        .ok_or_else(|| CompileError {
                             msg: format!("internal error: global '{}' not hoisted", name),
                             line: *line,
-                        }
-                    })?;
+                        })?;
                     self.var_init(init)?;
                     self.emit(Op::SetGlobal(g))?;
                 } else {
@@ -404,10 +408,7 @@ impl<'a> FuncCompiler<'a> {
                 self.emit(Op::Pop)?;
             }
             Stmt::If {
-                cond,
-                then,
-                els,
-                ..
+                cond, then, els, ..
             } => {
                 self.expr(cond)?;
                 let jf = self.emit(Op::JumpIfFalse(0))?;

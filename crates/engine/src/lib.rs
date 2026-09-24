@@ -84,7 +84,11 @@ mod tests {
         let mut b = make_battle(42);
         b.run();
         assert!(b.result.is_some(), "battle must end");
-        assert!(b.tick > 10, "battle should last a while, ended at {}", b.tick);
+        assert!(
+            b.tick > 10,
+            "battle should last a while, ended at {}",
+            b.tick
+        );
         let replay = write_replay(&b);
         assert!(replay.contains("\"format\":\"tank-replay\""));
         assert!(replay.contains("sweeper"));
@@ -157,12 +161,7 @@ mod tests {
         let mut b = sandbox_battle("func main() { while (true) { var x = 1 + 1; } }");
         b.run();
         assert!(!b.robots[0].alive, "budget-striking robot must forfeit");
-        assert!(b
-            .robots[0]
-            .fault
-            .as_deref()
-            .unwrap()
-            .contains("budget"));
+        assert!(b.robots[0].fault.as_deref().unwrap().contains("budget"));
         assert_eq!(b.result.as_ref().unwrap().winner, Some(1));
         // It must be disabled quickly, not stall the battle for long.
         assert!(b.tick < 100, "forfeited at tick {}", b.tick);
@@ -180,7 +179,10 @@ mod tests {
         }
         assert_eq!(b.robots[0].stats.budget_strikes, 0);
         assert!(b.robots[0].alive, "a well-behaved robot must never forfeit");
-        assert!(b.robots[0].pending.is_some(), "robot should be parked on await_tick");
+        assert!(
+            b.robots[0].pending.is_some(),
+            "robot should be parked on await_tick"
+        );
     }
 
     #[test]
@@ -191,15 +193,17 @@ mod tests {
         }
         assert!(b.robots[0].alive, "a halted robot idles; it does not die");
         assert!(b.robots[0].vm.is_none());
-        assert!(b.result.is_none(), "battle continues without it ending early");
+        assert!(
+            b.result.is_none(),
+            "battle continues without it ending early"
+        );
     }
 
     #[test]
     fn wall_collision_stops_and_damages() {
         // Drive into a wall and keep pushing: energy must drop.
-        let mut b = sandbox_battle(
-            "func main() { set_velocity(8); while (true) { await_tick(); } }",
-        );
+        let mut b =
+            sandbox_battle("func main() { set_velocity(8); while (true) { await_tick(); } }");
         let e0 = b.robots[0].energy;
         for _ in 0..300 {
             if b.result.is_some() {
@@ -214,13 +218,24 @@ mod tests {
     fn instantly_completing_blocking_calls_share_the_tick_budget() {
         // Each call completes at once and resumes the VM within the same
         // tick; without a shared budget this loop never yields.
-        for call in ["ahead(0)", "back(0)", "turn_body(0)", "turn_gun(0)", "turn_radar(0)"] {
+        for call in [
+            "ahead(0)",
+            "back(0)",
+            "turn_body(0)",
+            "turn_gun(0)",
+            "turn_radar(0)",
+        ] {
             let src = format!("func main() {{ while (true) {{ {}; }} }}", call);
             let mut b = sandbox_battle(&src);
             b.run();
             assert!(!b.robots[0].alive, "{} loop must forfeit", call);
             assert!(b.robots[0].fault.as_deref().unwrap().contains("budget"));
-            assert!(b.tick < 100, "{} loop forfeited late, at tick {}", call, b.tick);
+            assert!(
+                b.tick < 100,
+                "{} loop forfeited late, at tick {}",
+                call,
+                b.tick
+            );
         }
     }
 
@@ -234,7 +249,10 @@ mod tests {
             "ahead(sqrt(0 - 1))",
             "bearing_to(sqrt(0 - 1), 0)",
         ] {
-            let src = format!("func main() {{ {}; while (true) {{ await_tick(); }} }}", call);
+            let src = format!(
+                "func main() {{ {}; while (true) {{ await_tick(); }} }}",
+                call
+            );
             let mut b = sandbox_battle(&src);
             b.run();
             assert!(!b.robots[0].alive, "{} must forfeit", call);
@@ -245,10 +263,12 @@ mod tests {
                 b.robots[0].fault
             );
             // (The fault message itself says "NaN"; the numbers must not.)
-            assert!(b
-                .snapshots
+            assert!(b.snapshots.iter().all(|s| s
+                .robots
                 .iter()
-                .all(|s| s.robots.iter().flatten().chain(s.bullets.iter().flatten()).all(|v| v.is_finite())));
+                .flatten()
+                .chain(s.bullets.iter().flatten())
+                .all(|v| v.is_finite())));
         }
     }
 
@@ -295,12 +315,24 @@ mod tests {
         let p = logged_points(&b, 0);
         assert_eq!(p.len(), 5);
         let d = |a: (f64, f64), b: (f64, f64)| dist(a.0, a.1, b.0, b.1);
-        assert!((d(p[0], p[1]) - 20.0).abs() < 1e-6, "ahead(20) moved {}", d(p[0], p[1]));
+        assert!(
+            (d(p[0], p[1]) - 20.0).abs() < 1e-6,
+            "ahead(20) moved {}",
+            d(p[0], p[1])
+        );
         // back(10) issued at speed: net displacement is still 10, backwards.
-        assert!((d(p[2], p[3]) - 10.0).abs() < 1e-6, "back(10) moved {}", d(p[2], p[3]));
+        assert!(
+            (d(p[2], p[3]) - 10.0).abs() < 1e-6,
+            "back(10) moved {}",
+            d(p[2], p[3])
+        );
         assert!(d(p[0], p[3]) < d(p[0], p[2]), "back() must move backwards");
         // And the tank stops where the move ended.
-        assert!(d(p[3], p[4]) < 1e-6, "coasted {} after back()", d(p[3], p[4]));
+        assert!(
+            d(p[3], p[4]) < 1e-6,
+            "coasted {} after back()",
+            d(p[3], p[4])
+        );
     }
 
     #[test]
@@ -324,7 +356,11 @@ mod tests {
         }
         let count = |id| b.logs.iter().filter(|(_, r, _)| *r == id).count();
         assert_eq!(count(0), cfg.max_logs);
-        assert_eq!(count(1), 100, "the spammer must not use up others' log quota");
+        assert_eq!(
+            count(1),
+            100,
+            "the spammer must not use up others' log quota"
+        );
     }
 
     #[test]
@@ -350,5 +386,4 @@ mod tests {
         assert!(b.robots[0].events.is_empty());
         assert!(b.bullets.is_empty(), "spent bullets are removed");
     }
-
 }

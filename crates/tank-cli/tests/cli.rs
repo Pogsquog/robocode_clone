@@ -53,7 +53,11 @@ fn same_seed_produces_byte_identical_replays_across_processes() {
             .arg(path)
             .output()
             .expect("run tank");
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
     let ra = fs::read(&a).expect("replay a");
     let rb = fs::read(&b).expect("replay b");
@@ -104,14 +108,21 @@ fn three_robot_battle_works() {
         .arg(&out)
         .output()
         .expect("run tank");
-    assert!(res.status.success(), "{}", String::from_utf8_lossy(&res.stderr));
+    assert!(
+        res.status.success(),
+        "{}",
+        String::from_utf8_lossy(&res.stderr)
+    );
     let stdout = String::from_utf8_lossy(&res.stdout);
     assert!(stdout.contains("battle:"), "stdout: {}", stdout);
     let replay = fs::read_to_string(&out).unwrap();
     assert!(replay.contains("\"robots\":["));
     assert!(replay.matches("\"name\":").count() >= 3);
     for name in ["sweeper", "tracker", "corner"] {
-        assert!(replay.contains(&format!("\"name\":\"{}\"", name)), "robot names come from file stems");
+        assert!(
+            replay.contains(&format!("\"name\":\"{}\"", name)),
+            "robot names come from file stems"
+        );
     }
     let _ = fs::remove_file(&out);
 }
