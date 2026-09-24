@@ -154,7 +154,17 @@ impl Parser {
                 let then = self.block()?;
                 let els = if matches!(self.peek(), Tok::Else) {
                     self.bump();
-                    Some(self.block()?)
+                    if matches!(self.peek(), Tok::If) {
+                        // `else if ...` is `else { if ... }`. Each link of a
+                        // chain nests one level, so it counts toward the
+                        // nesting limit.
+                        self.enter()?;
+                        let nested = self.statement()?;
+                        self.depth -= 1;
+                        Some(vec![nested])
+                    } else {
+                        Some(self.block()?)
+                    }
                 } else {
                     None
                 };
@@ -584,6 +594,22 @@ mod tests {
     }
 
     #[test]
+    fn parses_else_if_as_nested_if() {
+        let prog = parse(
+            "func main() { if (a) { f(); } else if (b) { g(); } else if (c) { h(); } else { i(); } }",
+        )
+        .unwrap();
+        let Stmt::If { els: Some(els), .. } = &prog.funcs[0].body[0] else {
+            panic!("expected if/else");
+        };
+        assert_eq!(els.len(), 1);
+        let Stmt::If { els: Some(els), .. } = &els[0] else {
+            panic!("else if must nest an if");
+        };
+        assert!(matches!(&els[0], Stmt::If { els: Some(_), .. }));
+    }
+
+    #[test]
     fn rejects_bad_array_syntax() {
         for src in [
             "func main() { var a[n]; }",
@@ -618,6 +644,10 @@ mod tests {
             format!("func main() {{ var x = 1{}; }}", " + 1".repeat(n)),
             format!("func main() {{ var x = 1{}; }}", " && 1".repeat(n)),
             format!("func main() {{ {} }}", wrap(n, "if (1) { ", "", "}")),
+            format!(
+                "func main() {{ if (1) {{ }}{} }}",
+                " else if (1) { }".repeat(n)
+            ),
         ];
         for src in &cases {
             let err = parse(src).unwrap_err();
@@ -638,6 +668,12 @@ mod tests {
         let src = format!(
             "func main() {{ var x = 1{}; }}",
             " + 1".repeat(MAX_NESTING - 3)
+        );
+        crate::compile::compile_program(&parse(&src).unwrap()).unwrap();
+        let src = format!(
+            "func main() {{ if (1) {{ }}{} }}",
+            // Each link's own block and expression add a few levels.
+            " else if (1) { var x = (1); }".repeat(MAX_NESTING - 6)
         );
         crate::compile::compile_program(&parse(&src).unwrap()).unwrap();
     }

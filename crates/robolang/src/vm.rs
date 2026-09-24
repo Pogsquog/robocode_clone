@@ -662,6 +662,21 @@ mod tests {
     }
 
     #[test]
+    fn else_if_chains_take_the_first_true_branch() {
+        let logs = logged(
+            "func grade(n) { \
+                if (n >= 90) { return \"a\"; } \
+                else if (n >= 80) { return \"b\"; } \
+                else if (n >= 70) { return \"c\"; } \
+                else { return \"f\"; } } \
+             func main() { log(grade(95)); log(grade(85)); log(grade(75)); log(grade(10)); \
+                var hits = 0; if (false) { hits += 1; } else if (true) { hits += 10; } \
+                else if (true) { hits += 100; } log(hits); }",
+        );
+        assert_eq!(logs, vec!["a", "b", "c", "f", "10"]);
+    }
+
+    #[test]
     fn var_without_initializer_is_null_each_time() {
         let logs = logged(
             "func f() { for (var i = 0; i < 2; i += 1) { var x; log(x); x = 5; } } \

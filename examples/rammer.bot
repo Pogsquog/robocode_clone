@@ -58,8 +58,7 @@ func main() {
                 seen = true;
                 enemy_bearing = event_bearing();
                 enemy_dist = event_dist();
-            }
-            if (e == "hit_by_bullet") {
+            } else if (e == "hit_by_bullet") {
                 side = -side;
             }
             e = pop_event();

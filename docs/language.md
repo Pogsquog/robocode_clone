@@ -64,7 +64,7 @@ func name(param1, param2) { ... return value; }
 - Comparisons: `== != < <= > >=`, logic: `&& || !` (short-circuit).
 - Conditions are permissive: `0`, `""`, `false`, `null` are falsy.
 - Statements: `var x = 1;`, `x += 5;` (also `-=`, `*=`, `/=`),
-  `if / else`, `while`, `for (var i = 0; i < 10; i += 1) { ... }`,
+  `if / else if / else`, `while`, `for (var i = 0; i < 10; i += 1) { ... }`,
   `break;`, `continue;`, `return;` / `return expr;`.
 - Comments: `// line` and `/* block */`.
 
