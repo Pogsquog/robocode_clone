@@ -1,0 +1,168 @@
+// Phantom: circles side-on like duelist, but watches the enemy's energy.
+// A small drop means it just fired, and while that bullet is in flight
+// phantom may reverse or change speed at random, so a gun that predicts
+// its path from its current motion aims at a spot it never reaches.
+// Demonstrates: detecting enemy fire from energy drops, a pseudo-random
+// number generator, circular targeting.
+
+func angdiff(a, b) {
+    var d = (a - b) % 360;
+    if (d > 180) { d = d - 360; }
+    if (d <= -180) { d = d + 360; }
+    return d;
+}
+
+func clamp(v, lo, hi) { return max(lo, min(hi, v)); }
+
+// Pseudo-random number in [0, 1) (Park-Miller; exact in doubles).
+func rand() {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+}
+
+// Is the point `ahead` units along `heading` too close to a wall?
+func off_field(heading, ahead) {
+    var px = x() + sin(heading) * ahead;
+    var py = y() - cos(heading) * ahead;
+    return px < WALL || px > arena_w() - WALL || py < WALL || py > arena_h() - WALL;
+}
+
+// Rotate `heading` by `turn_dir` steps until the path ahead stays inside.
+func smooth(heading, turn_dir) {
+    for (var i = 0; i < 18 && off_field(heading, 130); i += 1) {
+        heading = heading + turn_dir * 10;
+    }
+    return norm_deg(heading);
+}
+
+// The enemy just fired: maybe change what we're doing.
+func dodge() {
+    var r = rand();
+    if (r < 0.3) { dir = -dir; }
+    r = rand();
+    if (r < 0.2) { speed = 3; }
+    else { speed = 8; }
+}
+
+func move() {
+    var bearing = bearing_to(ex, ey);
+    // Side-on, leaning away when closer than we'd like, in when farther.
+    var lean = clamp((PREFERRED - edist) / 8, -25, 50);
+    var want = smooth(bearing + dir * (90 + lean), -dir);
+    // If smoothing turned us back toward the enemy, circle the other way.
+    if (abs(angdiff(want, bearing)) < 35 && edist < 350) {
+        dir = -dir;
+        want = smooth(bearing + dir * (90 + lean), -dir);
+    }
+    // Drive forward or backward, whichever needs less turning.
+    var turn = angdiff(want, body_heading());
+    var v = speed;
+    if (turn > 90) { turn = turn - 180; v = -speed; }
+    else if (turn < -90) { turn = turn + 180; v = -speed; }
+    set_body_rate(turn);
+    set_velocity(v);
+}
+
+// Where will the enemy be when a bullet of `power` gets there? Steps its
+// position forward assuming it keeps its speed and turn rate, two ticks
+// per step to keep within the instruction budget.
+func aim(power) {
+    if (abs(evel) < 0.5) { return bearing_to(ex, ey); }
+    var bs = 20 - 4 * power;
+    var px = ex;
+    var py = ey;
+    var h = eheading;
+    var mx = x();
+    var my = y();
+    for (var t = 2; t < 90; t += 2) {
+        h = h + eturn * 2;
+        px = clamp(px + sin(h) * evel * 2, 18, arena_w() - 18);
+        py = clamp(py - cos(h) * evel * 2, 18, arena_h() - 18);
+        var dx = px - mx;
+        var dy = py - my;
+        if ((t * bs) * (t * bs) >= dx * dx + dy * dy) { break; }
+    }
+    return bearing_to(px, py);
+}
+
+func shoot() {
+    var power = 1.5;
+    if (edist < 150) { power = 3; }
+    else if (edist < 300) { power = 2.5; }
+    else if (edist > 600) { power = 1; }
+    power = min(power, energy() / 4);
+    if (power < 0.1) { return; }
+    fire_at(aim(power), power);
+}
+
+func on_scan() {
+    var nh = event_heading();
+    if (time() - etime == 1) {
+        eturn = clamp(angdiff(nh, eheading), -10, 10);
+    } else {
+        eturn = 0;
+    }
+    // Energy lost that our hits don't explain means the enemy fired.
+    var drop = eenergy - event_energy() - damage_dealt + energy_gained;
+    if (seen && drop >= 0.09 && drop <= 3.01) { dodge(); }
+    damage_dealt = 0;
+    energy_gained = 0;
+    eenergy = event_energy();
+    ex = event_x();
+    ey = event_y();
+    eheading = nh;
+    evel = event_velocity();
+    edist = event_dist();
+    etime = time();
+    seen = true;
+}
+
+func track() {
+    // Keep the beam on the enemy, overshooting a little so the arc it
+    // sweeps still covers the target after the gun and body have turned.
+    var diff = angdiff(bearing_to(ex, ey), radar_heading());
+    var over = 10;
+    if (diff < 0) { over = -10; }
+    set_radar_rate(diff + over);
+}
+
+func main() {
+    var WALL = 40;
+    var PREFERRED = 350;
+    var dir = 1;
+    var speed = 8;
+    // Seed from the start position (whole numbers keep the generator exact).
+    var seed = (x() * 7919 + y() * 104729) % 2147483646;
+    seed = 1 + seed - seed % 1;
+    var seen = false;
+    var ex = 0;
+    var ey = 0;
+    var eheading = 0;
+    var evel = 0;
+    var eturn = 0;
+    var edist = 1000;
+    var etime = -10;
+    var eenergy = 100;
+    var damage_dealt = 0;   // by our hits since the last scan
+    var energy_gained = 0;  // by the enemy hitting us since the last scan
+
+    set_radar_rate(45);
+    set_velocity(8);
+    while (true) {
+        var e = pop_event();
+        while (e != false) {
+            if (e == "scanned") { on_scan(); }
+            else if (e == "bullet_hit") { damage_dealt += 4 * event_power(); }
+            else if (e == "hit_by_bullet") { energy_gained += 3 * event_power(); }
+            e = pop_event();
+        }
+        if (seen && time() - etime <= 1) {
+            track();
+            shoot();
+        } else {
+            set_radar_rate(45);
+        }
+        if (seen) { move(); }
+        await_tick();
+    }
+}

@@ -272,4 +272,5 @@ go (see `examples/learner.bot`).
 | `examples/sniper.bot` | stationary lead-targeting sharpshooter |
 | `examples/learner.bot` | statistical ("guess factor") gun that learns movement patterns, using arrays |
 | `examples/rammer.bot` | charges on a curving path and fires heavy shots point-blank |
-| `examples/duelist.bot` | circles side-on at full speed, circular targeting; beats every other example |
+| `examples/duelist.bot` | circles side-on at full speed, circular targeting |
+| `examples/phantom.bot` | duelist's tactics, plus random reversals when it sees the enemy fire (spotted from its energy dropping) |
