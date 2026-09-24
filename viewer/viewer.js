@@ -72,13 +72,8 @@ function loadReplay(data) {
   banner.style.display = "none";
   hint.style.display = "none";
 
-  const w = data.arena.w, h = data.arena.h;
-  const pad = 16;
-  const scale = Math.min((window.innerWidth - 80) / w, (window.innerHeight - 260) / h);
-  canvas.width = Math.round(w * scale);
-  canvas.height = Math.round(h * scale);
-  canvas.dataset.w = w;
-  canvas.dataset.h = h;
+  canvas.dataset.w = data.arena.w;
+  canvas.dataset.h = data.arena.h;
 
   // Energy bars (built with DOM APIs: nothing from the file becomes markup).
   bars.replaceChildren();
@@ -105,8 +100,27 @@ function loadReplay(data) {
   playBtn.disabled = false;
   document.getElementById("backBtn").disabled = false;
   document.getElementById("fwdBtn").disabled = false;
+  fitCanvas(); // after the energy bars exist: they take vertical space
   setPlaying(true);
 }
+
+// Scale the canvas to the largest size that fits inside #stage (which flex
+// layout sizes to whatever the header, bars, controls and log leave over).
+function fitCanvas() {
+  if (!state.replay) return;
+  const w = state.replay.arena.w, h = state.replay.arena.h;
+  const stage = document.getElementById("stage");
+  const cs = getComputedStyle(stage);
+  const border = 4; // #arena has a 2px border on each side
+  const availW = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - border;
+  const availH = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - border;
+  const scale = Math.max(0.05, Math.min(availW / w, availH / h));
+  canvas.width = Math.floor(w * scale);
+  canvas.height = Math.floor(h * scale);
+  draw();
+}
+
+window.addEventListener("resize", fitCanvas);
 
 // ---------- playback ----------
 
