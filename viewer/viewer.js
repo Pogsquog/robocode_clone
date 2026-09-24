@@ -310,7 +310,8 @@ function drawTank(r, color, scale) {
 function drawBeam(r, robotIndex, scale) {
   const [x, y] = toCanvas(r[0], r[1]);
   const half = deg2rad((state.replay.arena.beam || 18) / 2);
-  const heading = deg2rad(r[4]);
+  // Canvas arc angles start at +x (east); game headings start at north.
+  const heading = deg2rad(r[4] - 90);
   const len = canvas.width + canvas.height;
   const color = state.replay.robots[robotIndex].color;
   ctx.fillStyle = hexToRgba(color, 0.10);
