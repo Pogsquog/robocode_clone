@@ -1,0 +1,145 @@
+// Duelist: circles the enemy side-on at full speed, so shots aimed at where
+// it is now fly past behind it, and fires at where the enemy will be,
+// predicted from the way it is moving and turning.
+// Demonstrates: circular targeting, wall smoothing, driving in either
+// direction, handling every queued event each tick.
+
+func angdiff(a, b) {
+    var d = (a - b) % 360;
+    if (d > 180) { d = d - 360; }
+    if (d <= -180) { d = d + 360; }
+    return d;
+}
+
+func clamp(v, lo, hi) { return max(lo, min(hi, v)); }
+
+// Is the point `ahead` units along `heading` too close to a wall?
+func off_field(heading, ahead) {
+    var px = x() + sin(heading) * ahead;
+    var py = y() - cos(heading) * ahead;
+    return px < WALL || px > arena_w() - WALL || py < WALL || py > arena_h() - WALL;
+}
+
+// Turn `heading` toward the enemy side (rotating in direction `-turn_dir`)
+// until the path ahead stays in the arena.
+func smooth(heading, turn_dir) {
+    for (var i = 0; i < 18 && off_field(heading, 130); i += 1) {
+        heading = heading + turn_dir * 10;
+    }
+    return norm_deg(heading);
+}
+
+func move() {
+    var bearing = bearing_to(ex, ey);
+    // Side-on, leaning away when closer than we'd like, in when farther.
+    var lean = clamp((PREFERRED - edist) / 8, -25, 50);
+    var want = smooth(bearing + dir * (90 + lean), -dir);
+    // If smoothing turned us back toward the enemy, circle the other way.
+    if (abs(angdiff(want, bearing)) < 35 && edist < 350) {
+        dir = -dir;
+        want = smooth(bearing + dir * (90 + lean), -dir);
+    }
+    // Drive forward or backward, whichever needs less turning.
+    var turn = angdiff(want, body_heading());
+    var speed = 8;
+    if (turn > 90) { turn = turn - 180; speed = -8; }
+    else if (turn < -90) { turn = turn + 180; speed = -8; }
+    set_body_rate(turn);
+    set_velocity(speed);
+}
+
+// Where will the enemy be when a bullet of `power` gets there? Steps its
+// position forward assuming it keeps its speed and turn rate, two ticks
+// per step to keep within the instruction budget.
+func aim(power) {
+    // A sitting target needs no prediction.
+    if (abs(evel) < 0.5) { return bearing_to(ex, ey); }
+    var bs = 20 - 4 * power;
+    var px = ex;
+    var py = ey;
+    var h = eheading;
+    var mx = x();
+    var my = y();
+    for (var t = 2; t < 90; t += 2) {
+        h = h + eturn * 2;
+        px = clamp(px + sin(h) * evel * 2, 18, arena_w() - 18);
+        py = clamp(py - cos(h) * evel * 2, 18, arena_h() - 18);
+        var dx = px - mx;
+        var dy = py - my;
+        if ((t * bs) * (t * bs) >= dx * dx + dy * dy) { break; }
+    }
+    return bearing_to(px, py);
+}
+
+func shoot() {
+    var power = 1.5;
+    if (edist < 150) { power = 3; }
+    else if (edist < 300) { power = 2.5; }
+    else if (edist > 600) { power = 1; }
+    // Don't shoot ourselves to death.
+    power = min(power, energy() / 4);
+    if (power < 0.1) { return; }
+    fire_at(aim(power), power);
+}
+
+func on_scan() {
+    var nh = event_heading();
+    var nv = event_velocity();
+    // Turn rate, from the heading change since the last scan (only if it
+    // was last tick; a gap would blur it).
+    if (time() - etime == 1) {
+        eturn = clamp(angdiff(nh, eheading), -10, 10);
+    } else {
+        eturn = 0;
+    }
+    ex = event_x();
+    ey = event_y();
+    eheading = nh;
+    evel = nv;
+    edist = event_dist();
+    etime = time();
+    seen = true;
+}
+
+func track() {
+    // Keep the beam on the enemy, overshooting a little so the arc it
+    // sweeps still covers the target after the gun and body (which carry
+    // the radar) have turned.
+    var bearing = bearing_to(ex, ey);
+    var diff = angdiff(bearing, radar_heading());
+    var over = 10;
+    if (diff < 0) { over = -10; }
+    set_radar_rate(diff + over);
+}
+
+func main() {
+    var WALL = 40;
+    var PREFERRED = 350;
+    var dir = 1;
+    var seen = false;
+    var ex = 0;
+    var ey = 0;
+    var eheading = 0;
+    var evel = 0;
+    var eturn = 0;
+    var edist = 1000;
+    var etime = -10;
+
+    set_radar_rate(45);
+    set_velocity(8);
+    while (true) {
+        var e = pop_event();
+        while (e != false) {
+            if (e == "scanned") { on_scan(); }
+            e = pop_event();
+        }
+        if (seen && time() - etime <= 1) {
+            track();
+            shoot();
+        } else {
+            set_radar_rate(45);
+        }
+        if (seen) { move(); }
+        await_tick();
+    }
+}

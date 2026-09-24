@@ -26,6 +26,7 @@ fn check_accepts_examples_and_rejects_garbage() {
         "sniper.bot",
         "learner.bot",
         "rammer.bot",
+        "duelist.bot",
     ] {
         let out = tank()
             .args(["check", &example(bot)])
