@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>tank replay viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #14171c; color: #d7dde4;
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 14px; background: #1b2027; border-bottom: 1px solid #2a323c;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .file { margin-left: auto; }
+  button, select, input[type="number"] {
+    background: #232a33; color: #d7dde4; border: 1px solid #38424e;
+    border-radius: 6px; padding: 5px 12px; font: inherit; cursor: pointer;
+  }
+  button:hover, select:hover { background: #2c3540; }
+  button:disabled { opacity: .45; cursor: default; }
+  #stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px; }
+  #arena { background: #0d0f13; border: 2px solid #38424e; border-radius: 4px; }
+  #controls {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: #1b2027; border-top: 1px solid #2a323c;
+  }
+  #scrub { flex: 1; }
+  #tickLabel { font-variant-numeric: tabular-nums; min-width: 90px; text-align: right; }
+  #logwrap {
+    height: 150px; overflow-y: auto; padding: 8px 14px;
+    font: 12px/1.5 ui-monospace, "Cascadia Mono", monospace;
+    background: #10131a; border-top: 1px solid #2a323c;
+  }
+  #logwrap .ev { white-space: pre-wrap; }
+  #logwrap .hit { color: #f0b63f; }
+  #logwrap .death { color: #e74c3c; font-weight: 600; }
+  #logwrap .log { color: #7f8c9b; }
+  #banner {
+    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+    background: rgba(20,23,28,.92); border: 1px solid #38424e; border-radius: 8px;
+    padding: 10px 22px; font-size: 18px; font-weight: 600; display: none;
+  }
+  #stagebox { position: relative; }
+  #drop {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(20,23,28,.9); border: 2px dashed #4a5666; border-radius: 8px; z-index: 5;
+    font-size: 22px;
+  }
+  #energybars { display: flex; gap: 18px; padding: 6px 14px; background: #1b2027; }
+  .bar { flex: 1; display: flex; align-items: center; gap: 8px; }
+  .bar .name { width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .track { flex: 1; height: 12px; background: #232a33; border-radius: 6px; overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 6px; transition: width .05s linear; }
+  .bar .val { width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+  #hint { padding: 40px; text-align: center; color: #7f8c9b; }
+</style>
+</head>
+<body>
+<header>
+  <h1>tank replay viewer</h1>
+  <button id="playBtn" disabled>Play</button>
+  <label>speed <select id="speed">
+    <option value="0.25">0.25&times;</option>
+    <option value="0.5">0.5&times;</option>
+    <option value="1" selected>1&times;</option>
+    <option value="2">2&times;</option>
+    <option value="4">4&times;</option>
+    <option value="8">8&times;</option>
+  </select></label>
+  <span class="file">
+    <input type="file" id="fileInput" accept=".json,application/json">
+  </span>
+</header>
+
+<div id="energybars"></div>
+
+<div id="stage">
+  <div id="stagebox">
+    <canvas id="arena" width="1000" height="700"></canvas>
+    <div id="banner"></div>
+    <div id="hint">no replay loaded &mdash; open a replay .json file, or drag one anywhere on this page<br><br>
+      run a battle first: <code>tank run examples/sweeper.bot examples/tracker.bot</code></div>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="backBtn" disabled>&#8630; 30</button>
+  <input type="range" id="scrub" min="0" max="0" value="0" step="1" disabled>
+  <button id="fwdBtn" disabled>30 &#8631;</button>
+  <span id="tickLabel">tick 0 / 0</span>
+</div>
+
+<div id="logwrap"></div>
+
+<script src="viewer.js"></script>
+</body>
+</html>

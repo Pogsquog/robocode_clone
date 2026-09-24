@@ -1,0 +1,10 @@
+[package]
+name = "tank-engine"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "engine"
+
+[dependencies]
+robolang = { path = "../robolang" }

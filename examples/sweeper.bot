@@ -1,0 +1,26 @@
+// Sweeper: orbits its radar, aims at whatever it finds, fires.
+// Demonstrates: advanced tick style (set_* + await_tick), event polling.
+
+func angdiff(a, b) {
+    var d = (a - b) % 360;
+    if (d > 180) { d = d - 360; }
+    if (d <= -180) { d = d + 360; }
+    return d;
+}
+
+func main() {
+    set_radar_rate(45);
+    set_body_rate(5);
+    set_velocity(4);
+    while (true) {
+        var e = pop_event();
+        if (e == "scanned") {
+            var diff = angdiff(event_bearing(), gun_heading());
+            set_gun_rate(diff * 2);
+            if (abs(diff) < 5 && gun_heat() <= 0 && energy() > 10) {
+                fire(2);
+            }
+        }
+        await_tick();
+    }
+}

@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/robolang",
+    "crates/engine",
+    "crates/tank-cli",
+]
+
+[profile.release]
+debug = false

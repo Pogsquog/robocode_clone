@@ -1,0 +1,45 @@
+// Sniper: stands still, locks its radar on the target, and fires aimed,
+// lead-corrected shots. Slow, heavy bullets that usually connect.
+// Demonstrates: predictive aiming with the math helpers.
+
+func angdiff(a, b) {
+    var d = (a - b) % 360;
+    if (d > 180) { d = d - 360; }
+    if (d <= -180) { d = d + 360; }
+    return d;
+}
+
+func aim_and_fire() {
+    var power = 2;
+    var bs = 20 - 4 * power; // bullet speed for this power
+    var dx = event_x() - x();
+    var dy = event_y() - y();
+    var d = sqrt(dx * dx + dy * dy);
+    var t = d / bs; // flight time
+    // Predict where the target will be when the bullet arrives.
+    // Heading is 0 = north, clockwise: east is +x, south is +y.
+    var px = event_x() + sin(event_heading()) * event_velocity() * t;
+    var py = event_y() - cos(event_heading()) * event_velocity() * t;
+    var aim = bearing_to(px, py);
+    var diff = angdiff(aim, gun_heading());
+    set_gun_rate(diff * 3);
+    if (abs(diff) < 2 && gun_heat() <= 0 && d < 600) {
+        fire(power);
+    }
+    // Keep the radar locked on the target.
+    set_radar_rate(angdiff(event_bearing(), radar_heading()) * 3);
+}
+
+func main() {
+    set_radar_rate(45);
+    while (true) {
+        var e = pop_event();
+        if (e == "scanned") {
+            aim_and_fire();
+        } else {
+            // Nothing in sight: resume the search sweep.
+            set_radar_rate(45);
+        }
+        await_tick();
+    }
+}

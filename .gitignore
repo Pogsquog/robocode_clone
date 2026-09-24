@@ -1,0 +1,12 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Battle/replay output
+/tank_replay.json
+*.replay.json
+battle.json
+
+# Local dev/editor junk
+.crush/
+.DS_Store

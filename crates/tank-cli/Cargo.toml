@@ -1,0 +1,12 @@
+[package]
+name = "tank-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tank"
+path = "src/main.rs"
+
+[dependencies]
+tank-engine = { path = "../engine" }
+robolang = { path = "../robolang" }

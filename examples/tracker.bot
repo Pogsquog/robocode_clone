@@ -1,0 +1,42 @@
+// Tracker: locks its radar and gun onto the target, fires continuously,
+// and wiggles to dodge return fire.
+// Demonstrates: radar lock (turn the radar with the target), event fields.
+
+func angdiff(a, b) {
+    var d = (a - b) % 360;
+    if (d > 180) { d = d - 360; }
+    if (d <= -180) { d = d + 360; }
+    return d;
+}
+
+func main() {
+    set_radar_rate(45);
+    set_velocity(5);
+    var wiggle = 1;
+    while (true) {
+        var e = pop_event();
+        if (e == "scanned") {
+            // Keep the radar on the target: rotate toward it.
+            set_radar_rate(angdiff(event_bearing(), radar_heading()) * 3);
+            // Aim the gun.
+            var diff = angdiff(event_bearing(), gun_heading());
+            set_gun_rate(diff * 2);
+            if (abs(diff) < 4 && gun_heat() <= 0) {
+                fire(1.5);
+            }
+        }
+        // Wiggle: change direction every 25 ticks.
+        if (time() % 25 == 0) {
+            wiggle = -wiggle;
+            set_body_rate(wiggle * 4);
+        }
+        // Low energy: stop wiggling, stand still and shoot carefully.
+        if (energy() < 25) {
+            set_velocity(0);
+            set_body_rate(0);
+        } else {
+            set_velocity(5 * wiggle);
+        }
+        await_tick();
+    }
+}

@@ -1,0 +1,46 @@
+// Corner: drives to the nearest corner and holds it, sweeping and firing.
+// Demonstrates: blocking navigation style (turn_body / ahead), then combat.
+
+func angdiff(a, b) {
+    var d = (a - b) % 360;
+    if (d > 180) { d = d - 360; }
+    if (d <= -180) { d = d + 360; }
+    return d;
+}
+
+func dist_to(tx, ty) {
+    var dx = tx - x();
+    var dy = ty - y();
+    return sqrt(dx * dx + dy * dy);
+}
+
+func main() {
+    // Pick the nearest corner.
+    var tx = 60;
+    var ty = 60;
+    if (x() > arena_w() / 2) { tx = arena_w() - 60; }
+    if (y() > arena_h() / 2) { ty = arena_h() - 60; }
+
+    turn_body(angdiff(bearing_to(tx, ty), body_heading()));
+    ahead(dist_to(tx, ty));
+
+    // Hold the corner: sweep until we find someone, then lock the radar on
+    // them (continuous scans) and converge the gun onto them.
+    set_radar_rate(45);
+    while (true) {
+        var e = pop_event();
+        if (e == "scanned") {
+            // Lock the radar onto the target so it rescans every tick.
+            set_radar_rate(angdiff(event_bearing(), radar_heading()) * 3);
+            var diff = angdiff(event_bearing(), gun_heading());
+            set_gun_rate(diff * 2);
+            if (abs(diff) < 4 && gun_heat() <= 0) {
+                fire(1);
+            }
+        } else {
+            // Nothing in sight: resume the search sweep.
+            set_radar_rate(45);
+        }
+        await_tick();
+    }
+}
