@@ -392,6 +392,23 @@ mod tests {
     }
 
     #[test]
+    fn atan2_inverts_sin_and_cos_in_degrees() {
+        let mut b = sandbox_battle(
+            "func main() { log(atan2(sin(30), cos(30))); log(atan2(sin(-120), cos(-120))); \
+             log(atan2(1, 0)); log(norm_deg(atan2(8, 0 - 0))); log(atan2(0, 0)); \
+             while (true) { await_tick(); } }",
+        );
+        b.step();
+        let logs: Vec<&str> = b
+            .logs
+            .iter()
+            .filter(|(_, r, _)| *r == 0)
+            .map(|(_, _, m)| m.as_str())
+            .collect();
+        assert_eq!(logs, vec!["30", "-120", "90", "90", "0"]);
+    }
+
+    #[test]
     fn log_cap_is_per_robot() {
         let cfg = Config::default();
         let specs = vec![

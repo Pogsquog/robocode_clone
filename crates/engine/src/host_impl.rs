@@ -280,6 +280,13 @@ impl<'a> Host for RobotHost<'a> {
                     r.x, r.y, tx, ty,
                 ))))
             }
+            // Plain maths, in degrees: the inverse of sin/cos, so
+            // atan2(sin(a), cos(a)) == a (for a in -180..180).
+            Atan2 => Ok(HostOutcome::Value(Value::Num(
+                num_arg(&args, 0, "atan2")?
+                    .atan2(num_arg(&args, 1, "atan2")?)
+                    .to_degrees(),
+            ))),
 
             // Handled above; unreachable here.
             Ahead | Back | TurnBody | TurnGun | TurnRadar | AwaitTick | Fire => {

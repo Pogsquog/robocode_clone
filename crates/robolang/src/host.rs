@@ -58,6 +58,7 @@ pub enum HostFn {
     Sqrt,
     NormDeg,
     BearingTo,
+    Atan2,
 }
 
 /// (function, name, arity). Order must match the enum discriminants.
@@ -103,6 +104,7 @@ pub const HOST_FN_TABLE: &[(HostFn, &str, u8)] = &[
     (HostFn::Sqrt, "sqrt", 1),
     (HostFn::NormDeg, "norm_deg", 1),
     (HostFn::BearingTo, "bearing_to", 2),
+    (HostFn::Atan2, "atan2", 2),
 ];
 
 impl HostFn {

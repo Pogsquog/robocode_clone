@@ -227,8 +227,19 @@ Events become visible the tick after they happen.
 
 `sin(deg)`, `cos(deg)`, `abs(n)`, `min(a,b)`, `max(a,b)`, `sqrt(n)`,
 `norm_deg(deg)` (normalize to 0..360), `bearing_to(x, y)` (absolute bearing
-from you to a point — the key to aiming), `log(anything)` (debug output,
-shown by `--verbose` and in the replay viewer; up to 500 lines per robot).
+from you to a point — the key to aiming), `atan2(y, x)`, `log(anything)`
+(debug output, shown by `--verbose` and in the replay viewer; up to 500
+lines per robot).
+
+`atan2(y, x)` is ordinary maths in degrees (-180..180), the inverse of
+`sin` and `cos`: `atan2(sin(a), cos(a))` gives back `a`. Two common uses:
+
+```
+// Heading (0 = north, clockwise) of a movement vector (vx, vy):
+var h = norm_deg(atan2(vx, 0 - vy));
+// Angular half-width of a tank (radius 18) seen from distance d:
+var half = atan2(18, d);
+```
 
 ### Aiming recipe
 
