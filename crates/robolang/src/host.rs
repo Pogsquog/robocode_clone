@@ -25,6 +25,7 @@ pub enum HostFn {
     SetRadarRate,
     // Actions.
     Fire,
+    FireAt,
     Log,
     // State getters.
     X,
@@ -74,6 +75,7 @@ pub const HOST_FN_TABLE: &[(HostFn, &str, u8)] = &[
     (HostFn::SetGunRate, "set_gun_rate", 1),
     (HostFn::SetRadarRate, "set_radar_rate", 1),
     (HostFn::Fire, "fire", 1),
+    (HostFn::FireAt, "fire_at", 2),
     (HostFn::Log, "log", 1),
     (HostFn::X, "x", 0),
     (HostFn::Y, "y", 0),

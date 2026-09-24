@@ -408,6 +408,91 @@ mod tests {
         assert_eq!(logs, vec!["30", "-120", "90", "90", "0"]);
     }
 
+    /// A battle against an opponent that never moves or fires.
+    fn vs_sitting_duck(src: &str, seed: u64) -> Battle {
+        let specs = vec![
+            RobotSpec {
+                name: "shooter".into(),
+                source: src.into(),
+            },
+            RobotSpec {
+                name: "duck".into(),
+                source: "func main() { while (true) { await_tick(); } }".into(),
+            },
+        ];
+        Battle::new(Config::default(), &specs, seed, 3000).unwrap()
+    }
+
+    #[test]
+    fn fire_at_never_misses_a_stationary_target() {
+        // Remember the target's bearing and request the shot every tick.
+        let src = "func main() { var aim = -1; set_radar_rate(45); while (true) { \
+                   if (pop_event() == \"scanned\") { aim = event_bearing(); } \
+                   if (aim >= 0) { fire_at(aim, 1); } \
+                   await_tick(); } }";
+        for seed in 1..=5 {
+            let mut b = vs_sitting_duck(src, seed);
+            // Until the duck dies (after that, shots have nothing to hit).
+            while b.result.is_none() && b.tick < 1000 {
+                b.step();
+            }
+            let s = &b.robots[0].stats;
+            assert!(s.fired >= 5, "seed {}: fired only {}", seed, s.fired);
+            let in_flight = b.bullets.iter().filter(|x| x.owner == 0).count() as u32;
+            assert_eq!(
+                s.fired,
+                s.bullet_hits + in_flight,
+                "seed {}: every bullet must hit or still be flying",
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn fire_at_turns_at_most_the_gun_rate_and_fires_on_arrival() {
+        let mut b = vs_sitting_duck(
+            "func main() { var aim = gun_heading() + 90; \
+             while (true) { fire_at(aim, 1); await_tick(); } }",
+            7,
+        );
+        let start = b.robots[0].gun_heading();
+        for tick in 1..=4 {
+            b.step();
+            let turned = ang_diff(b.robots[0].gun_heading(), start);
+            assert!(
+                (turned - 20.0 * tick as f64).abs() < 1e-9,
+                "tick {}: {}",
+                tick,
+                turned
+            );
+            assert_eq!(b.robots[0].stats.fired, 0, "fired before reaching the aim");
+        }
+        b.step();
+        assert!((ang_diff(b.robots[0].gun_heading(), start) - 90.0).abs() < 1e-9);
+        assert_eq!(b.robots[0].stats.fired, 1, "fires the tick it arrives");
+        let bullet = b.bullets.iter().find(|x| x.owner == 0).expect("bullet");
+        assert!(ang_diff(bullet.heading, norm_deg(start + 90.0)).abs() < 1e-9);
+        // Held on target while the gun cools: no second shot until it has.
+        for _ in 0..9 {
+            b.step();
+        }
+        assert_eq!(b.robots[0].stats.fired, 1);
+    }
+
+    #[test]
+    fn fire_at_lasts_one_tick() {
+        let mut b = vs_sitting_duck(
+            "func main() { fire_at(gun_heading() + 90, 1); while (true) { await_tick(); } }",
+            7,
+        );
+        let start = b.robots[0].gun_heading();
+        for _ in 0..5 {
+            b.step();
+        }
+        assert!((ang_diff(b.robots[0].gun_heading(), start) - 20.0).abs() < 1e-9);
+        assert_eq!(b.robots[0].stats.fired, 0);
+    }
+
     #[test]
     fn log_cap_is_per_robot() {
         let cfg = Config::default();

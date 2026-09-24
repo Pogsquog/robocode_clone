@@ -34,38 +34,6 @@ impl<'a> RobotHost<'a> {
     pub fn new(battle: &'a mut Battle, id: usize) -> RobotHost<'a> {
         RobotHost { battle, id }
     }
-
-    fn fire_bullet(&mut self, power: f64) -> Result<HostOutcome, String> {
-        let cfg = self.battle.cfg.clone();
-        let id = self.id;
-        let power = power.clamp(cfg.min_fire_power, cfg.max_fire_power);
-        {
-            let r = &self.battle.robots[id];
-            if !r.alive || r.gun_heat > 0.0 || r.energy < power {
-                return Ok(HostOutcome::Value(Value::Bool(false)));
-            }
-        }
-        let r = &mut self.battle.robots[id];
-        let gun_h = r.gun_heading();
-        let (x, y) = (r.x, r.y);
-        r.gun_heat = cfg.cooldown_base + cfg.cooldown_factor * power;
-        r.energy -= power;
-        r.stats.fired += 1;
-        let rad = gun_h.to_radians();
-        let spawn_x = x + (cfg.tank_radius + 1.0) * rad.sin();
-        let spawn_y = y - (cfg.tank_radius + 1.0) * rad.cos();
-        self.battle.bullets.push(crate::battle::Bullet {
-            owner: id,
-            x: spawn_x,
-            y: spawn_y,
-            heading: gun_h,
-            speed: cfg.bullet_speed_base - cfg.bullet_speed_factor * power,
-            power,
-            spawn_tick: self.battle.tick,
-            alive: true,
-        });
-        Ok(HostOutcome::Value(Value::Bool(true)))
-    }
 }
 
 impl<'a> Host for RobotHost<'a> {
@@ -101,7 +69,12 @@ impl<'a> Host for RobotHost<'a> {
                 )))
             }
             AwaitTick => return Ok(HostOutcome::Block(robolang::BlockRequest::AwaitTick)),
-            Fire => return self.fire_bullet(num_arg(&args, 0, "fire")?),
+            Fire => {
+                let power = num_arg(&args, 0, "fire")?;
+                return Ok(HostOutcome::Value(Value::Bool(
+                    self.battle.try_fire(id, power),
+                )));
+            }
             _ => {}
         }
 
@@ -137,6 +110,15 @@ impl<'a> Host for RobotHost<'a> {
             }
 
             // Actions.
+            FireAt => {
+                // Resolved at the end of the movement phase (Battle::
+                // resolve_fire_requests): turn the gun onto `heading`, and
+                // fire along it if the gun got there and can fire.
+                let heading = norm_deg(num_arg(&args, 0, "fire_at")?);
+                let power = num_arg(&args, 1, "fire_at")?;
+                self.battle.robots[id].fire_request = Some((heading, power));
+                Ok(HostOutcome::Value(Value::Null))
+            }
             Log => {
                 let msg = args.first().map(|v| v.to_display()).unwrap_or_default();
                 if self.battle.robots[id].stats.logs < self.battle.cfg.max_logs {

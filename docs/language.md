@@ -16,13 +16,9 @@ func main() {
     while (true) {
         var e = pop_event();         // check what happened
         if (e == "scanned") {
-            // Someone is in the radar beam: point the gun at them.
-            var diff = norm_deg(event_bearing() - gun_heading());
-            if (diff > 180) { diff = diff - 360; }
-            set_gun_rate(diff * 2);
-            if (abs(diff) < 5 && gun_heat() <= 0) {
-                fire(2);
-            }
+            // Someone is in the radar beam: swing the gun onto them and
+            // fire as soon as it's there.
+            fire_at(event_bearing(), 2);
         }
         await_tick();                // let one tick of battle happen
     }
@@ -186,8 +182,21 @@ found target (see `tracker.bot`) rescans it every tick.
 
 ### Guns and bullets
 
-`fire(power)` fires along the current gun heading if the gun is cool and you
-can afford it; returns `true`/`false`.
+There are two ways to shoot:
+
+- **`fire_at(heading, power)`**: the easy, accurate way. At the end of
+  this tick the engine turns the gun onto the absolute `heading`, as far as
+  the gun can turn in one tick (20°), and fires along it if the gun got
+  there, is cool, and you can afford the shot. It fires exactly on the
+  heading, so there's no aiming error to allow for. If the heading is out
+  of reach or the gun is still hot, the gun just turns toward it. The
+  request lasts one tick, so call it every tick you want the gun on target
+  (it also keeps the gun aimed while it cools). It overrides
+  `set_gun_rate` for that tick; it has no effect while a `turn_gun()` is in
+  progress.
+- **`fire(power)`**: fires immediately along wherever the gun points now, if
+  the gun is cool and you can afford it; returns `true`/`false`. Use it
+  with your own gun steering (`set_gun_rate`, `turn_gun`).
 
 | Power | 0.1 .. 3.0 (values are clamped) |
 |---|---|
@@ -243,14 +252,15 @@ var half = atan2(18, d);
 
 ### Aiming recipe
 
+Point at where the target is, and let `fire_at` do the rest:
+
 ```
-var diff = bearing_to(event_x(), event_y()) - gun_heading();
-diff = norm_deg(diff); if (diff > 180) { diff = diff - 360; }  // shortest turn
-set_gun_rate(diff * 2);
+fire_at(bearing_to(event_x(), event_y()), 2);
 ```
 
 For moving targets, predict where they will be when the bullet arrives and
-aim there instead — see `examples/sniper.bot`.
+aim there instead (see `examples/sniper.bot`), or learn where they tend to
+go (see `examples/learner.bot`).
 
 ## Example robots
 

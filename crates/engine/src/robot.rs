@@ -74,6 +74,9 @@ pub struct Robot {
     pub events: VecDeque<Event>,
     /// Event most recently returned by pop_event(); accessors read it.
     pub current_event: Option<Event>,
+    /// This tick's `fire_at(heading, power)` request, resolved (and cleared)
+    /// at the end of the movement phase.
+    pub fire_request: Option<(f64, f64)>,
     pub stats: RobotStats,
 }
 

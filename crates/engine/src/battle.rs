@@ -4,7 +4,8 @@
 //! 1. VM phase: resume robots whose blocking op completed, run their code
 //!    within the instruction budget, collect intents (bullets may spawn).
 //! 2. Movement phase: cool the gun, apply pending/intent turn rates and
-//!    velocity, integrate positions, resolve wall and robot collisions.
+//!    velocity, integrate positions, resolve wall and robot collisions,
+//!    then resolve `fire_at` requests (bullets may spawn).
 //! 3. Bullet phase: advance bullets, resolve hits.
 //! 4. Death/end phase: apply deaths, decide the winner.
 //! 5. Radar phase: sweep beams, queue Scanned events (readable next tick).
@@ -110,6 +111,7 @@ impl Battle {
                 vm: Some(Vm::new(prog)),
                 events: VecDeque::new(),
                 current_event: None,
+                fire_request: None,
                 stats: Default::default(),
             });
         }
@@ -144,6 +146,7 @@ impl Battle {
         self.tick_log.clear();
         self.vm_phase();
         self.movement_phase();
+        self.resolve_fire_requests();
         self.bullet_phase();
         self.death_phase();
         self.radar_phase();
@@ -336,7 +339,13 @@ impl Battle {
                     *remaining -= d;
                     d
                 }
-                _ => r.intent_gun_rate.clamp(-cfg.max_gun_rate, cfg.max_gun_rate),
+                // fire_at() this tick: turn straight onto the requested
+                // heading, or as far toward it as the gun can.
+                _ => match r.fire_request {
+                    Some((heading, _)) => ang_diff(heading, r.gun_heading())
+                        .clamp(-cfg.max_gun_rate, cfg.max_gun_rate),
+                    None => r.intent_gun_rate.clamp(-cfg.max_gun_rate, cfg.max_gun_rate),
+                },
             };
             r.gun_rel += gun_rate;
 
@@ -451,6 +460,48 @@ impl Battle {
                 }
             }
         }
+    }
+
+    /// Resolve this tick's `fire_at` requests, after guns have turned and
+    /// tanks have moved: fire along the requested heading if the gun reached
+    /// it. Requests last one tick.
+    fn resolve_fire_requests(&mut self) {
+        for i in 0..self.robots.len() {
+            let Some((heading, power)) = self.robots[i].fire_request.take() else {
+                continue;
+            };
+            let r = &self.robots[i];
+            if r.alive && ang_diff(heading, r.gun_heading()).abs() <= self.cfg.epsilon {
+                self.try_fire(i, power);
+            }
+        }
+    }
+
+    /// Fire along the current gun heading if the gun is cool and the robot
+    /// can afford it. Returns whether a bullet was fired.
+    pub(crate) fn try_fire(&mut self, id: usize, power: f64) -> bool {
+        let cfg = &self.cfg;
+        let power = power.clamp(cfg.min_fire_power, cfg.max_fire_power);
+        let r = &mut self.robots[id];
+        if !r.alive || r.gun_heat > 0.0 || r.energy < power {
+            return false;
+        }
+        let gun_h = r.gun_heading();
+        r.gun_heat = cfg.cooldown_base + cfg.cooldown_factor * power;
+        r.energy -= power;
+        r.stats.fired += 1;
+        let rad = gun_h.to_radians();
+        self.bullets.push(Bullet {
+            owner: id,
+            x: r.x + (cfg.tank_radius + 1.0) * rad.sin(),
+            y: r.y - (cfg.tank_radius + 1.0) * rad.cos(),
+            heading: gun_h,
+            speed: cfg.bullet_speed_base - cfg.bullet_speed_factor * power,
+            power,
+            spawn_tick: self.tick,
+            alive: true,
+        });
+        true
     }
 
     // ----- Phase 3: bullets ---------------------------------------------------
