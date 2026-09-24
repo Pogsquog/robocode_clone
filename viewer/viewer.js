@@ -13,6 +13,7 @@ const state = {
   speed: 1,
   lastFrameTime: null,
   acc: 0,
+  treads: null,   // per-robot cumulative track travel, see computeTreads
 };
 
 const FALLBACK_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c", "#e91e63", "#cddc39"];
@@ -65,6 +66,7 @@ function loadReplay(data) {
     r.name = String(r.name);
   });
   state.replay = data;
+  state.treads = computeTreads(data);
   state.frame = 0;
   state.playing = false;
   logwrap.replaceChildren();
@@ -240,7 +242,7 @@ function draw() {
   // Tanks.
   snap.r.forEach((r, i) => {
     if (r[6] < 0.5) return;
-    drawTank(r, rep.robots[i].color, scale);
+    drawTank(r, i, rep.robots[i].color, scale);
   });
 
   // Energy bars + labels.
@@ -268,43 +270,130 @@ function draw() {
   }
 }
 
-function drawTank(r, color, scale) {
+// Tank drawing proportions, as fractions of the collision radius. The hull
+// is slightly narrower than it is long; the tracks run down either side.
+const TANK = {
+  len: 1.9,       // overall length (tracks)
+  wid: 1.7,       // overall width across both tracks
+  track: 0.42,    // width of each track
+  hullLen: 1.6,   // hull length between the tracks
+  cleat: 4,       // tread cleat spacing, in arena units
+};
+
+function drawTank(r, i, color, scale) {
   const [x, y] = toCanvas(r[0], r[1]);
-  const bodyR = (state.replay.arena.tank_r || 18) * scale;
+  const R = (state.replay.arena.tank_r || 18) * scale;
+  const L = TANK.len * R, Wd = TANK.wid * R, tw = TANK.track * R;
+  const tread = state.treads[i];
+  const f = state.frame * 2;
 
-  // Body: circle with a direction wedge.
+  // Body frame: rotate so local -y is the body's forward direction.
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(deg2rad(r[2]));
+
+  drawTrack(-Wd / 2, -L / 2, tw, L, tread[f], scale);
+  drawTrack(Wd / 2 - tw, -L / 2, tw, L, tread[f + 1], scale);
+
+  // Hull between the tracks, with a darker front glacis showing heading.
+  const hw = Wd - 2 * tw + 2 * scale, hl = TANK.hullLen * R;
   ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(x, y, bodyR, 0, Math.PI * 2);
+  ctx.fillRect(-hw / 2, -hl / 2, hw, hl);
+  ctx.fillStyle = "rgba(0,0,0,.28)";
+  ctx.fillRect(-hw / 2, -hl / 2, hw, hl * 0.18);
+  ctx.strokeStyle = "rgba(0,0,0,.55)";
+  ctx.lineWidth = Math.max(1, 1.5 * scale);
+  ctx.strokeRect(-hw / 2, -hl / 2, hw, hl);
+  ctx.restore();
+
+  // Turret and barrel, in the gun's frame.
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(deg2rad(r[3]));
+  const bw = 3.5 * scale;
+  ctx.fillStyle = "#c9c3b0";
+  ctx.fillRect(-bw / 2, -R * 1.45, bw, R * 1.45);
+  ctx.strokeStyle = "rgba(0,0,0,.6)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-bw / 2, -R * 1.45, bw, R * 1.45);
+  ctx.fillStyle = shade(color, 0.72);
+  roundRect(-R * 0.5, -R * 0.55, R, R * 1.05, R * 0.25);
   ctx.fill();
-  ctx.strokeStyle = "rgba(0,0,0,.45)";
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(0,0,0,.6)";
+  ctx.lineWidth = Math.max(1, 1.5 * scale);
   ctx.stroke();
+  ctx.restore();
 
-  // Direction tick on the body rim.
-  const bh = deg2rad(r[2]);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3 * scale;
-  ctx.beginPath();
-  ctx.moveTo(x + Math.sin(bh) * bodyR * 0.4, y - Math.cos(bh) * bodyR * 0.4);
-  ctx.lineTo(x + Math.sin(bh) * bodyR * 0.95, y - Math.cos(bh) * bodyR * 0.95);
-  ctx.stroke();
-
-  // Gun: line from center outward.
-  const gh = deg2rad(r[3]);
-  ctx.strokeStyle = "#e8e2d0";
-  ctx.lineWidth = 4 * scale;
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + Math.sin(gh) * bodyR * 1.35, y - Math.cos(gh) * bodyR * 1.35);
-  ctx.stroke();
-
-  // Radar: small marker at the rim in the radar direction.
+  // Radar: small dish on the turret facing the radar direction.
   const rh = deg2rad(r[4]);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rh);
+  ctx.strokeStyle = "#7fd8ff";
+  ctx.lineWidth = Math.max(1.5, 2.2 * scale);
+  ctx.beginPath();
+  ctx.arc(0, R * 0.35, R * 0.32, deg2rad(-150), deg2rad(-30));
+  ctx.stroke();
   ctx.fillStyle = "#7fd8ff";
   ctx.beginPath();
-  ctx.arc(x + Math.sin(rh) * bodyR * 0.75, y - Math.cos(rh) * bodyR * 0.75, 3.5 * scale, 0, Math.PI * 2);
+  ctx.arc(0, R * 0.2, 1.8 * scale, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
+}
+
+// One track, in body-local coordinates. `travel` is how far this side has
+// rolled (arena units); cleats scroll with it so the tread visibly moves.
+function drawTrack(x0, y0, w, h, travel, scale) {
+  ctx.fillStyle = "#23272d";
+  ctx.fillRect(x0, y0, w, h);
+  const step = TANK.cleat * scale;
+  // The top run of a track moves forward relative to the hull, i.e. toward -y.
+  let off = -((travel * scale) % step);
+  if (off < 0) off += step;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0, y0, w, h);
+  ctx.clip();
+  ctx.strokeStyle = "#5b636e";
+  ctx.lineWidth = Math.max(1, 1.4 * scale);
+  ctx.beginPath();
+  for (let cy = y0 + off - step; cy < y0 + h + step; cy += step) {
+    ctx.moveTo(x0 + 1, cy);
+    ctx.lineTo(x0 + w - 1, cy);
+  }
+  ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle = "#0b0c0e";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x0, y0, w, h);
+}
+
+// Cumulative distance rolled by each track, for every frame of every robot:
+// treads[robot][2*frame] = left, [2*frame+1] = right. Derived from the pose
+// history so the animation is right when scrubbing, and turning in place
+// runs the two tracks in opposite directions.
+function computeTreads(rep) {
+  const n = rep.ticks.length;
+  const halfW = (rep.arena.tank_r || 18) * (TANK.wid - TANK.track) / 2;
+  return rep.robots.map((_, i) => {
+    const out = new Float64Array(n * 2);
+    for (let k = 1; k < n; k++) {
+      const a = rep.ticks[k - 1].r[i], b = rep.ticks[k].r[i];
+      let dl = 0, dr = 0;
+      if (a && b && a[6] >= 0.5 && b[6] >= 0.5) {
+        const h = deg2rad(a[2]);
+        const fwd = (b[0] - a[0]) * Math.sin(h) - (b[1] - a[1]) * Math.cos(h);
+        let dh = b[2] - a[2];
+        dh -= 360 * Math.round(dh / 360);
+        // Clockwise turn: the left track runs forward, the right backward.
+        dl = fwd + deg2rad(dh) * halfW;
+        dr = fwd - deg2rad(dh) * halfW;
+      }
+      out[2 * k] = out[2 * k - 2] + dl;
+      out[2 * k + 1] = out[2 * k - 1] + dr;
+    }
+    return out;
+  });
 }
 
 function drawBeam(r, robotIndex, scale) {
@@ -355,6 +444,23 @@ function span(cls, text) {
   el.className = cls;
   if (text !== undefined) el.textContent = text;
   return el;
+}
+
+// Scale a #rrggbb color's channels by `k` (<1 darkens).
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = (v) => Math.round(Math.min(255, v * k));
+  return `rgb(${c((n >> 16) & 255)},${c((n >> 8) & 255)},${c(n & 255)})`;
+}
+
+function roundRect(x, y, w, h, rad) {
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
 }
 
 function hexToRgba(hex, alpha) {
