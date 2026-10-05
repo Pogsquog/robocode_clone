@@ -530,6 +530,20 @@ mod tests {
     }
 
     #[test]
+    fn spinning_gun_and_radar_angles_stay_bounded() {
+        let mut b = sandbox_battle(
+            "func main() { set_gun_rate(20); set_radar_rate(-45); \
+             while (true) { await_tick(); } }",
+        );
+        for _ in 0..500 {
+            b.step();
+        }
+        let r = &b.robots[0];
+        assert!((0.0..360.0).contains(&r.gun_rel), "gun_rel {}", r.gun_rel);
+        assert!((0.0..360.0).contains(&r.radar_rel), "radar_rel {}", r.radar_rel);
+    }
+
+    #[test]
     fn fire_at_lasts_one_tick() {
         let mut b = vs_sitting_duck(
             "func main() { fire_at(gun_heading() + 90, 1); while (true) { await_tick(); } }",

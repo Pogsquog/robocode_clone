@@ -345,7 +345,8 @@ impl Battle {
                     None => r.intent_gun_rate.clamp(-cfg.max_gun_rate, cfg.max_gun_rate),
                 },
             };
-            r.gun_rel += gun_rate;
+            // Kept in [0, 360) so precision does not decay as it spins.
+            r.gun_rel = norm_deg(r.gun_rel + gun_rate);
 
             // Radar rotation (relative to gun).
             let radar_rate = match &mut r.pending {
@@ -358,7 +359,7 @@ impl Battle {
                     .intent_radar_rate
                     .clamp(-cfg.max_radar_rate, cfg.max_radar_rate),
             };
-            r.radar_rel += radar_rate;
+            r.radar_rel = norm_deg(r.radar_rel + radar_rate);
 
             // Velocity: pending movement drives the target speed, slowing
             // in time to stop at the requested distance.
