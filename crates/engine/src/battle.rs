@@ -16,7 +16,7 @@ use crate::event::{Event, EventKind};
 use crate::host_impl::RobotHost;
 use crate::replay::Snapshot;
 use crate::rng::Rng;
-use crate::robot::{ang_diff, bearing_deg, dist, norm_deg, point_segment_dist, Pending, Robot};
+use crate::robot::{ang_diff, bearing_deg, dist, norm_deg, segment_circle_entry, Pending, Robot};
 use robolang::{self, BlockRequest, RunOutcome, Value, Vm};
 use std::collections::VecDeque;
 
@@ -543,14 +543,19 @@ impl Battle {
             let nx = b_x + b_speed * h.sin();
             let ny = b_y - b_speed * h.cos();
 
-            // Find the first victim (robots in id order).
+            // The victim is the first tank along the bullet's path this tick
+            // (ties go to the lower id).
             let hit_r = cfg.tank_radius + cfg.bullet_pad;
-            let victim: Option<usize> = self
-                .robots
-                .iter()
-                .filter(|r| r.alive && r.id != b_owner)
-                .find(|r| point_segment_dist(r.x, r.y, b_x, b_y, nx, ny) <= hit_r)
-                .map(|r| r.id);
+            let mut victim: Option<usize> = None;
+            let mut victim_t = f64::INFINITY;
+            for r in self.robots.iter().filter(|r| r.alive && r.id != b_owner) {
+                if let Some(t) = segment_circle_entry(r.x, r.y, hit_r, b_x, b_y, nx, ny) {
+                    if t < victim_t {
+                        victim_t = t;
+                        victim = Some(r.id);
+                    }
+                }
+            }
 
             if let Some(v) = victim {
                 let damage = cfg.bullet_damage_factor * b_power;

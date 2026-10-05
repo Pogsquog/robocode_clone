@@ -606,7 +606,11 @@ mod tests {
         }
         let r = &b.robots[0];
         assert!((0.0..360.0).contains(&r.gun_rel), "gun_rel {}", r.gun_rel);
-        assert!((0.0..360.0).contains(&r.radar_rel), "radar_rel {}", r.radar_rel);
+        assert!(
+            (0.0..360.0).contains(&r.radar_rel),
+            "radar_rel {}",
+            r.radar_rel
+        );
     }
 
     #[test]
@@ -649,6 +653,40 @@ mod tests {
             100,
             "the spammer must not use up others' log quota"
         );
+    }
+
+    #[test]
+    fn a_bullet_hits_the_first_tank_in_its_path() {
+        let idle = "func main() { while (true) { await_tick(); } }";
+        let specs: Vec<RobotSpec> = ["shooter", "far", "near"]
+            .iter()
+            .map(|n| RobotSpec {
+                name: n.to_string(),
+                source: idle.into(),
+            })
+            .collect();
+        let mut b = Battle::new(Config::default(), &specs, 1, 3000).unwrap();
+        b.step();
+        // A bullet flying north from (500, 400) grazes both tanks this tick:
+        // "near" (id 2) early in its path, "far" (id 1) near the end.
+        for (id, x, y) in [(0, 100.0, 100.0), (1, 480.0, 375.0), (2, 520.0, 390.0)] {
+            b.robots[id].x = x;
+            b.robots[id].y = y;
+        }
+        b.bullets.push(Bullet {
+            owner: 0,
+            x: 500.0,
+            y: 400.0,
+            heading: 0.0,
+            speed: 19.6,
+            power: 0.1,
+            spawn_tick: 0,
+            alive: true,
+        });
+        let (far, near) = (b.robots[1].energy, b.robots[2].energy);
+        b.step();
+        assert_eq!(b.robots[1].energy, far, "the farther tank is shielded");
+        assert!(b.robots[2].energy < near, "the nearer tank is hit");
     }
 
     #[test]

@@ -142,17 +142,35 @@ pub fn dist(x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
     ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt()
 }
 
-/// Distance from point p to segment (ax, ay)-(bx, by).
-pub fn point_segment_dist(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
-    let dx = bx - ax;
-    let dy = by - ay;
-    let len2 = dx * dx + dy * dy;
-    if len2 == 0.0 {
-        return dist(px, py, ax, ay);
+/// Where segment (ax, ay)-(bx, by) first comes within `r` of point p, as a
+/// fraction of the way along it (0 = start), or None if it never does.
+pub fn segment_circle_entry(
+    px: f64,
+    py: f64,
+    r: f64,
+    ax: f64,
+    ay: f64,
+    bx: f64,
+    by: f64,
+) -> Option<f64> {
+    let (fx, fy) = (ax - px, ay - py);
+    let c = fx * fx + fy * fy - r * r;
+    if c <= 0.0 {
+        return Some(0.0); // starts inside
     }
-    let t = ((px - ax) * dx + (py - ay) * dy) / len2;
-    let t = t.clamp(0.0, 1.0);
-    dist(px, py, ax + t * dx, ay + t * dy)
+    let (dx, dy) = (bx - ax, by - ay);
+    let a = dx * dx + dy * dy;
+    if a == 0.0 {
+        return None;
+    }
+    let b = 2.0 * (fx * dx + fy * dy);
+    let disc = b * b - 4.0 * a * c;
+    if disc < 0.0 {
+        return None;
+    }
+    // Starting outside, both roots share a sign: the nearer is the entry.
+    let t = (-b - disc.sqrt()) / (2.0 * a);
+    (0.0..=1.0).contains(&t).then_some(t)
 }
 
 #[cfg(test)]
@@ -177,9 +195,19 @@ mod tests {
     }
 
     #[test]
-    fn segment_distance() {
-        assert!((point_segment_dist(5.0, 5.0, 0.0, 0.0, 10.0, 0.0) - 5.0).abs() < 1e-9);
-        assert!((point_segment_dist(-1.0, 0.0, 0.0, 0.0, 10.0, 0.0) - 1.0).abs() < 1e-9);
-        assert!((point_segment_dist(20.0, 0.0, 0.0, 0.0, 10.0, 0.0) - 10.0).abs() < 1e-9);
+    fn segment_entry() {
+        let e = |px, py, r| segment_circle_entry(px, py, r, 0.0, 0.0, 10.0, 0.0);
+        // Circle straddling the segment: entered 3 units along it.
+        assert!((e(5.0, 0.0, 2.0).unwrap() - 0.3).abs() < 1e-9);
+        // Off to the side but within reach.
+        assert!((e(5.0, 3.0, 5.0).unwrap() - 0.1).abs() < 1e-9);
+        // Starting inside.
+        assert_eq!(e(1.0, 0.0, 2.0), Some(0.0));
+        // Missed: too far to the side, behind the start, beyond the end.
+        assert_eq!(e(5.0, 5.0, 4.9), None);
+        assert_eq!(e(-5.0, 0.0, 2.0), None);
+        assert_eq!(e(15.0, 0.0, 2.0), None);
+        // Touching the end exactly.
+        assert_eq!(e(12.0, 0.0, 2.0), Some(1.0));
     }
 }
