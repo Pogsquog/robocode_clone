@@ -402,6 +402,46 @@ mod tests {
     }
 
     #[test]
+    fn a_short_move_at_speed_comes_back_to_its_target() {
+        // At full speed the tank cannot stop within 1 unit: it overshoots,
+        // then must drive back and finish exactly 1 unit ahead, at rest.
+        let mut b = vs_sitting_duck(
+            "func here() { log(x() + \",\" + y()); } \
+             func main() { \
+                turn_body(norm_deg(bearing_to(arena_w() / 2, arena_h() / 2) \
+                                   - body_heading() + 180) - 180); \
+                set_velocity(8); \
+                for (var i = 0; i < 6; i += 1) { await_tick(); } \
+                set_velocity(0); here(); ahead(1); here(); \
+                log(velocity()); await_tick(); here(); \
+                while (true) { await_tick(); } }",
+            3,
+        );
+        for _ in 0..60 {
+            b.step();
+        }
+        assert_eq!(b.robots[0].stats.damage_taken, 0.0, "must not hit anything");
+        let logs: Vec<&String> = b
+            .logs
+            .iter()
+            .filter(|(_, r, _)| *r == 0)
+            .map(|(_, _, m)| m)
+            .collect();
+        assert_eq!(logs.len(), 4, "{:?}", logs);
+        let pt = |m: &str| {
+            let (x, y) = m.split_once(',').unwrap();
+            (x.parse::<f64>().unwrap(), y.parse::<f64>().unwrap())
+        };
+        let (p0, p1, p2) = (pt(logs[0]), pt(logs[1]), pt(logs[3]));
+        let moved = dist(p0.0, p0.1, p1.0, p1.1);
+        assert!((moved - 1.0).abs() < 1e-6, "ahead(1) moved {}", moved);
+        assert!(
+            dist(p1.0, p1.1, p2.0, p2.1) < 1e-6,
+            "coasted on after the move ended"
+        );
+    }
+
+    #[test]
     fn a_move_stopped_by_a_wall_resumes_the_robot() {
         // Heads for a wall with a move far longer than the arena: the wall
         // must end the move and the code after it must run.

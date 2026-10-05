@@ -362,9 +362,12 @@ impl Battle {
             r.radar_rel = norm_deg(r.radar_rel + radar_rate);
 
             // Velocity: pending movement drives the target speed, slowing
-            // in time to stop at the requested distance.
+            // in time to stop at the requested distance. A tank too fast to
+            // stop in time overshoots (remaining < 0) and comes back.
             let target = match r.pending {
-                Some(Pending::Move { remaining, dir }) => dir * move_speed(remaining, &cfg),
+                Some(Pending::Move { remaining, dir }) => {
+                    dir * remaining.signum() * move_speed(remaining.abs(), &cfg)
+                }
                 _ => r.intent_velocity.clamp(-cfg.max_speed, cfg.max_speed),
             };
             r.velocity = next_velocity(r.velocity, target, &cfg);
@@ -816,7 +819,7 @@ fn end_move(pending: &mut Option<Pending>) {
 
 fn pending_complete(p: &Pending, cfg: &Config) -> bool {
     match p {
-        Pending::Move { remaining, .. } => *remaining <= cfg.epsilon,
+        Pending::Move { remaining, .. } => remaining.abs() <= cfg.epsilon,
         Pending::TurnBody { remaining }
         | Pending::TurnGun { remaining }
         | Pending::TurnRadar { remaining } => remaining.abs() <= cfg.epsilon,

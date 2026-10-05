@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Pending {
     /// Move `remaining` units forward (`dir = 1`) or backward (`dir = -1`).
+    /// `remaining` goes negative if the tank overshoots; it then drives back.
     Move {
         remaining: f64,
         dir: f64,

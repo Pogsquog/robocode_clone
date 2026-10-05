@@ -154,6 +154,10 @@ Two styles, freely mixable:
 | `turn_radar(deg)` | rotate the radar (relative to gun) |
 | `await_tick()` | suspend for exactly one tick |
 
+A move ends exactly `dist` units from where it started. If the tank is going
+too fast to stop in time, it overshoots and drives back. A wall or another
+tank ends the move early.
+
 **Advanced style** — set rates/velocity that persist every tick:
 
 | Function | Effect |
