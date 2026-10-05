@@ -222,9 +222,11 @@ if the queue is empty. After popping, read the event's details with the
 | `"bullet_missed"` | your bullet left the arena | |
 | `"wall"` | you hit a wall (your move stops) | `event_bearing` |
 | `"robot_collision"` | you bumped a robot | `event_bearing`, `event_name` |
-| `"robot_death"` | an enemy died | `event_name` |
+| `"robot_death"` | an enemy died or forfeited | `event_name`, `event_x/y` |
 
-Events become visible the tick after they happen.
+Events become visible the tick after they happen. The queue holds 64
+events; when it is full, the oldest is dropped to make room, so a robot
+that has been busy (say, in a long `ahead`) still sees the latest events.
 
 ### State getters
 

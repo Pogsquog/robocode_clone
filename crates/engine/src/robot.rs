@@ -89,10 +89,13 @@ impl Robot {
         norm_deg(self.body_heading + self.gun_rel + self.radar_rel)
     }
 
+    /// Queue an event. A full queue drops its oldest event, so a robot that
+    /// has not read its events for a while sees the latest ones.
     pub fn queue_event(&mut self, cfg: &Config, e: Event) {
-        if self.events.len() < cfg.event_queue_cap {
-            self.events.push_back(e);
+        if self.events.len() >= cfg.event_queue_cap {
+            self.events.pop_front();
         }
+        self.events.push_back(e);
     }
 
     /// Max body turn rate at the current speed.

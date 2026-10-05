@@ -186,6 +186,26 @@ mod tests {
     }
 
     #[test]
+    fn a_full_event_queue_drops_its_oldest_event() {
+        let mut b = sandbox_battle("func main() { while (true) { await_tick(); } }");
+        let cfg = b.cfg.clone();
+        let extra = 5;
+        for i in 0..cfg.event_queue_cap + extra {
+            let mut e = event::Event::empty(event::EventKind::Scanned);
+            e.dist = i as f64;
+            b.robots[0].queue_event(&cfg, e);
+        }
+        let q = &b.robots[0].events;
+        assert_eq!(q.len(), cfg.event_queue_cap);
+        assert_eq!(q.front().unwrap().dist, extra as f64, "oldest dropped");
+        assert_eq!(
+            q.back().unwrap().dist,
+            (cfg.event_queue_cap + extra - 1) as f64,
+            "newest kept"
+        );
+    }
+
+    #[test]
     fn busy_loop_hits_budget_and_forfeits() {
         // No blocking call anywhere: burns the budget every tick.
         let mut b = sandbox_battle("func main() { while (true) { var x = 1 + 1; } }");
