@@ -56,9 +56,58 @@ function loadFile(f) {
   reader.readAsText(f);
 }
 
+// Replays may come from anyone. Check everything drawing relies on before
+// touching any state, so a bad file is rejected and the current replay (and
+// the animation loop) carry on untouched. Size limits bound drawing work.
+function validateReplay(data) {
+  const fail = (msg) => { throw new Error(msg); };
+  const isNum = (v, lo, hi) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi;
+  const isIndex = (v, n) => Number.isInteger(v) && v >= 0 && v < n;
+  const LIMIT = 1e6; // any coordinate, angle or energy
+
+  const a = data.arena;
+  if (!a || typeof a !== "object") fail("missing arena");
+  if (!isNum(a.w, 100, 20000) || !isNum(a.h, 100, 20000)) fail("bad arena size");
+  if (a.tank_r !== undefined && !isNum(a.tank_r, 1, 200)) fail("bad tank radius");
+  if (a.beam !== undefined && !isNum(a.beam, 0, 360)) fail("bad radar beam");
+
+  const n = Array.isArray(data.robots) ? data.robots.length : 0;
+  if (n < 1 || n > 256) fail("replay must have 1 to 256 robots");
+  if (!data.robots.every((r) => r && typeof r === "object")) fail("bad robot entry");
+
+  if (!Array.isArray(data.ticks) || data.ticks.length === 0) fail("replay has no ticks");
+  data.ticks.forEach((t, k) => {
+    const where = `tick ${k}`;
+    if (!t || typeof t !== "object" || !isNum(t.t, 0, Number.MAX_SAFE_INTEGER)) fail(`${where}: bad tick`);
+    if (!Array.isArray(t.r) || t.r.length !== n) fail(`${where}: expected ${n} robots`);
+    for (const r of t.r) {
+      if (!Array.isArray(r) || r.length !== 7 || !r.every((v) => isNum(v, -LIMIT, LIMIT))) {
+        fail(`${where}: bad robot state`);
+      }
+    }
+    if (t.b !== undefined) {
+      if (!Array.isArray(t.b)) fail(`${where}: bad bullets`);
+      for (const b of t.b) {
+        if (!Array.isArray(b) || b.length !== 4 || !isNum(b[0], -LIMIT, LIMIT) ||
+            !isNum(b[1], -LIMIT, LIMIT) || !isIndex(b[2], n) || !isNum(b[3], 0, 10)) {
+          fail(`${where}: bad bullet`);
+        }
+      }
+    }
+    if (t.e !== undefined && !Array.isArray(t.e)) fail(`${where}: bad events`);
+  });
+
+  if (data.result !== undefined && data.result !== null) {
+    const w = data.result.winner;
+    if (w !== null && w !== undefined && !isIndex(w, n)) fail("bad winner");
+  }
+}
+
 function loadReplay(data) {
-  if (!data.ticks || data.ticks.length === 0) throw new Error("replay has no ticks");
-  // Replays may come from anyone: colors are only ever used as #rrggbb.
+  validateReplay(data);
+  data.ticks.forEach((t) => { if (t.e) t.e = t.e.map(String); });
+  if (data.result) data.result.reason = String(data.result.reason ?? "");
+  // Colors are only ever used as #rrggbb.
   data.robots.forEach((r, i) => {
     if (typeof r.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(r.color)) {
       r.color = FALLBACK_COLORS[i % FALLBACK_COLORS.length];
@@ -414,6 +463,18 @@ function drawBeam(r, robotIndex, scale) {
 // ---------- main loop ----------
 
 function tick(now) {
+  // Schedule the next frame first, so an error drawing this one can never
+  // stop the loop for good.
+  requestAnimationFrame(tick);
+  try {
+    advance(now);
+  } catch (err) {
+    setPlaying(false);
+    console.error("playback stopped:", err);
+  }
+}
+
+function advance(now) {
   if (state.playing && state.replay) {
     if (state.lastFrameTime === null) state.lastFrameTime = now;
     const dt = (now - state.lastFrameTime) / 1000;
@@ -433,7 +494,6 @@ function tick(now) {
     state.lastFrameTime = null;
     state.acc = 0;
   }
-  requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
 
