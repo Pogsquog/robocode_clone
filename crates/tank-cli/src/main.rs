@@ -223,16 +223,24 @@ fn cmd_run(args: &[String]) -> ExitCode {
 
     // Result.
     let res = battle.result.as_ref().expect("battle finished");
-    let reason = match res.reason {
-        engine::EndReason::LastStanding => "last robot standing",
-        engine::EndReason::TickLimit => "tick limit (highest energy wins)",
-    };
     match res.winner {
-        Some(w) => println!(
-            "winner: {} at tick {} ({})",
-            battle.robots[w].name, res.tick, reason
-        ),
-        None => println!("draw at tick {} ({})", res.tick, reason),
+        Some(w) => {
+            let reason = match res.reason {
+                engine::EndReason::LastStanding => "last robot standing",
+                engine::EndReason::TickLimit => "tick limit, highest energy",
+            };
+            println!(
+                "winner: {} at tick {} ({})",
+                battle.robots[w].name, res.tick, reason
+            )
+        }
+        None => {
+            let reason = match res.reason {
+                engine::EndReason::LastStanding => "no robot left standing",
+                engine::EndReason::TickLimit => "tick limit, tied on energy",
+            };
+            println!("draw at tick {} ({})", res.tick, reason)
+        }
     }
 
     // Stats table.
