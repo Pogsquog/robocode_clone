@@ -442,6 +442,32 @@ mod tests {
     }
 
     #[test]
+    fn tanks_overlapping_at_a_wall_separate_in_one_tick() {
+        let idle = "func main() { while (true) { await_tick(); } }";
+        let mut b = sandbox_battle(idle);
+        let r = b.cfg.tank_radius;
+        // One tank flush against the left wall, the other overlapping it,
+        // in a straight line and at an angle.
+        for (bx, by) in [(r + 16.0, 300.0), (r + 12.0, 310.0)] {
+            b.robots[0].x = r;
+            b.robots[0].y = 300.0;
+            b.robots[1].x = bx;
+            b.robots[1].y = by;
+            let e0 = b.robots[0].energy;
+            b.step();
+            let d = dist(b.robots[0].x, b.robots[0].y, b.robots[1].x, b.robots[1].y);
+            assert!(d >= 2.0 * r, "still overlapping: {} apart", d);
+            assert_eq!(b.robots[0].x, r, "the pinned tank stays in the arena");
+            b.step();
+            assert_eq!(
+                b.robots[0].energy,
+                e0 - b.cfg.collision_damage,
+                "one collision, not one per tick"
+            );
+        }
+    }
+
+    #[test]
     fn atan2_inverts_sin_and_cos_in_degrees() {
         let mut b = sandbox_battle(
             "func main() { log(atan2(sin(30), cos(30))); log(atan2(sin(-120), cos(-120))); \

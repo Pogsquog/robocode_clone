@@ -418,16 +418,15 @@ impl Battle {
                     } else {
                         (1.0, 0.0)
                     };
-                    let overlap = (min_d - d) / 2.0 + self.cfg.epsilon;
-                    self.robots[a].x -= dx * overlap;
-                    self.robots[a].y -= dy * overlap;
-                    self.robots[b].x += dx * overlap;
-                    self.robots[b].y += dy * overlap;
-                    // Clamp both back inside the arena.
-                    let m = self.cfg.tank_radius;
+                    // Each takes half the separation; whatever a wall stops
+                    // one from taking, the other takes instead.
+                    let need = min_d - d + 2.0 * self.cfg.epsilon;
+                    let moved_a = self.shove(a, -dx, -dy, need / 2.0);
+                    let moved_b = self.shove(b, dx, dy, need - moved_a);
+                    if moved_a + moved_b < need {
+                        self.shove(a, -dx, -dy, need - moved_a - moved_b);
+                    }
                     for idx in [a, b] {
-                        self.robots[idx].x = self.robots[idx].x.clamp(m, self.cfg.arena_w - m);
-                        self.robots[idx].y = self.robots[idx].y.clamp(m, self.cfg.arena_h - m);
                         self.robots[idx].velocity = 0.0;
                         end_move(&mut self.robots[idx].pending);
                     }
@@ -459,6 +458,17 @@ impl Battle {
                 }
             }
         }
+    }
+
+    /// Move robot `i` up to `amount` along the unit vector (`dx`, `dy`),
+    /// stopping at the arena edge. Returns the distance moved along it.
+    fn shove(&mut self, i: usize, dx: f64, dy: f64, amount: f64) -> f64 {
+        let m = self.cfg.tank_radius;
+        let r = &mut self.robots[i];
+        let (x0, y0) = (r.x, r.y);
+        r.x = (r.x + dx * amount).clamp(m, self.cfg.arena_w - m);
+        r.y = (r.y + dy * amount).clamp(m, self.cfg.arena_h - m);
+        (r.x - x0) * dx + (r.y - y0) * dy
     }
 
     /// Resolve this tick's `fire_at` requests, after guns have turned and
