@@ -289,12 +289,10 @@ impl Battle {
     }
 
     fn forfeit(&mut self, i: usize, reason: String) {
-        self.robots[i].alive = false;
         self.robots[i].fault = Some(reason.clone());
-        self.robots[i].pending = None;
-        self.robots[i].vm = None;
         self.tick_log
             .push(format!("{} forfeits: {}", self.robots[i].name, reason));
+        self.remove_robot(i);
     }
 
     // ----- Phase 2: movement --------------------------------------------------
@@ -619,11 +617,17 @@ impl Battle {
     }
 
     fn kill(&mut self, i: usize) {
+        self.tick_log
+            .push(format!("{} was destroyed", self.robots[i].name));
+        self.remove_robot(i);
+    }
+
+    /// Take a robot out of the battle (destroyed or forfeited) and tell the
+    /// survivors.
+    fn remove_robot(&mut self, i: usize) {
         self.robots[i].alive = false;
         self.robots[i].pending = None;
         self.robots[i].vm = None;
-        self.tick_log
-            .push(format!("{} was destroyed", self.robots[i].name));
         let name = self.robots[i].name.clone();
         let (x, y) = (self.robots[i].x, self.robots[i].y);
         for j in 0..self.robots.len() {

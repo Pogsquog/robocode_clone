@@ -156,6 +156,36 @@ mod tests {
     }
 
     #[test]
+    fn a_forfeit_tells_the_survivors() {
+        let watcher = "func main() { while (true) { var e = pop_event(); \
+                       while (e != false) { if (e == \"robot_death\") { log(event_name()); } \
+                       e = pop_event(); } await_tick(); } }";
+        let specs: Vec<RobotSpec> = [
+            ("faulter", "func main() { await_tick(); var x = 1 / 0; }"),
+            ("w1", watcher),
+            ("w2", watcher),
+        ]
+        .iter()
+        .map(|(n, s)| RobotSpec {
+            name: n.to_string(),
+            source: s.to_string(),
+        })
+        .collect();
+        let mut b = Battle::new(Config::default(), &specs, 5, 3000).unwrap();
+        for _ in 0..5 {
+            b.step();
+        }
+        assert!(!b.robots[0].alive);
+        for id in 1..3 {
+            assert!(
+                b.logs.iter().any(|(_, r, m)| *r == id && m == "faulter"),
+                "robot {} was not told about the forfeit",
+                id
+            );
+        }
+    }
+
+    #[test]
     fn busy_loop_hits_budget_and_forfeits() {
         // No blocking call anywhere: burns the budget every tick.
         let mut b = sandbox_battle("func main() { while (true) { var x = 1 + 1; } }");
