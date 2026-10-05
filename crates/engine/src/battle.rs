@@ -198,6 +198,8 @@ impl Battle {
             };
             self.robots[i].vm = Some(vm);
             match outcome {
+                // No return: the loop's next `vm.take()` finds None and
+                // returns.
                 RunOutcome::Halted => {
                     self.robots[i].vm = None;
                     self.tick_log
@@ -495,6 +497,9 @@ impl Battle {
         let cfg = &self.cfg;
         let power = power.clamp(cfg.min_fire_power, cfg.max_fire_power);
         let r = &mut self.robots[id];
+        // Deliberate: a robot may spend its last energy on a shot. Reaching
+        // exactly 0 destroys it in death_phase (Robocode disables the tank
+        // instead; we don't).
         if !r.alive || r.gun_heat > 0.0 || r.energy < power {
             return false;
         }
@@ -628,6 +633,8 @@ impl Battle {
             .collect();
         if self.result.is_none() {
             match alive.len() {
+                // Nobody left is a draw: LastStanding with no winner (the
+                // CLI and viewer show it as a draw).
                 0 => self.finish(EndReason::LastStanding),
                 1 => self.finish(EndReason::LastStanding),
                 _ => {}

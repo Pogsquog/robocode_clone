@@ -97,7 +97,9 @@ impl Vm {
         let fc = &self.prog.funcs[func];
         let nlocals = fc.nlocals;
         let base = self.stack.len().saturating_sub(fc.nparams);
-        // Ensure all local slots (args + declared vars) exist.
+        // Ensure all local slots (args + declared vars) exist. These pushes
+        // skip the MAX_STACK check; that is fine, as they are bounded by
+        // MAX_FRAMES x MAX_LOCALS (96 x 256) slots.
         while self.stack.len() < base + nlocals {
             self.stack.push(Value::Null);
         }

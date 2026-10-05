@@ -101,6 +101,7 @@ pub fn write_replay(battle: &Battle) -> String {
     out.push_str("],");
     if let Some(res) = &battle.result {
         let reason = match res.reason {
+            // With "winner": null, this means every robot died: a draw.
             EndReason::LastStanding => "last_standing",
             EndReason::TickLimit => "tick_limit",
         };

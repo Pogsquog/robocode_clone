@@ -172,6 +172,8 @@ fn cmd_run(args: &[String]) -> ExitCode {
     }
 
     // Load and pre-validate all robots (nice errors before the battle starts).
+    // Battle::new compiles them again. That is deliberate: compiling is cheap,
+    // and this pass reports the file path and exits with the usage code 2.
     let mut specs = Vec::new();
     for path in &paths {
         let source = match std::fs::read_to_string(path) {
