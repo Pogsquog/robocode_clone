@@ -170,9 +170,10 @@ pub fn compile_program(ast: &crate::ast::Program) -> Result<Rc<Program>, Compile
     ordered.push(main);
     let mut next = 1u16;
     for f in ast.funcs.iter() {
-        if f.name == "main" {
+        if std::ptr::eq(f, main) {
             continue;
         }
+        // A second `main` is rejected here as a duplicate.
         insert(next, f, &mut func_index)?;
         func_params.insert(next, f.params.len());
         ordered.push(f);
@@ -857,6 +858,12 @@ mod tests {
     #[test]
     fn rejects_missing_main() {
         assert!(compile("func other() { return 1; }").is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_main() {
+        let err = compile("func main() { } func main() { unknown(); }").unwrap_err();
+        assert!(err.contains("duplicate function 'main'"), "{}", err);
     }
 
     #[test]
